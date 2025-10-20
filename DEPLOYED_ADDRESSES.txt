@@ -1,0 +1,28 @@
+# ==============================================================================
+# ENDEREÇOS DOS CONTRATOS DEPLOYED - 2025-10-19
+# ==============================================================================
+
+# COPIE ESTAS LINHAS PARA O SEU .env
+
+PROPERTY_TITLE_ADDRESS=0xd2c99fd420074331ce18337e29126878d5f30229
+APPROVALS_MODULE_ADDRESS=0x74df12b5d3902d7dc123b2194ec8d20aa9c505bb
+REGISTRY_MODULE_ADDRESS=0x79270e1fd353d902c39ed231df9e59d6c15839af
+APPROVERS_REGISTRY_ADDRESS=0x842f8a2edee57372509cdc85ae86cee5c68db67f
+IDENTITY_REGISTRY_ADDRESS=0xc278fe6acad7dea524330366599063612cca916e
+MODULAR_COMPLIANCE_ADDRESS=0x09ec6c6db20413dfa339be1db8504deb3abb0c13
+
+# ==============================================================================
+# ORDEM DE DEPLOYMENT (REFERÊNCIA)
+# ==============================================================================
+
+# Contract 1:  0x3037cf7ace990a6246afb9575b06075d6ff500a5  - ClaimTopicsRegistry
+# Contract 2:  0xfa71cf61f03acde944f9048c91675223ea6ac555  - TrustedIssuersRegistry
+# Contract 3:  0x631ba32a287c4f274d81792d73b4b1bf198ee201  - IdentityRegistryStorage
+# Contract 4:  0xc278fe6acad7dea524330366599063612cca916e  - IdentityRegistry ✅
+# Contract 5:  0x2daee38ebb056e6c5fd36012ddfd24a03993c566  - Identity (adminIdentity)
+# Contract 6:  0x09ec6c6db20413dfa339be1db8504deb3abb0c13  - ModularCompliance ✅
+# Contract 7:  0x842f8a2edee57372509cdc85ae86cee5c68db67f  - ApproversRegistry ✅
+# Contract 8:  0x74df12b5d3902d7dc123b2194ec8d20aa9c505bb  - ApprovalsModule ✅
+# Contract 9:  0x79270e1fd353d902c39ed231df9e59d6c15839af  - RegistryMDCompliance ✅
+# Contract 10: 0xd2c99fd420074331ce18337e29126878d5f30229  - PropertyTitleTREX ✅
+
