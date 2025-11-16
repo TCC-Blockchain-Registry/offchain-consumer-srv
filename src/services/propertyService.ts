@@ -318,9 +318,9 @@ export class PropertyService {
   ): Promise<string> {
     try {
       console.log(`📝 Atualizando propriedade ${matriculaId}...`);
-      
+
       const registryModule = getRegistryModuleWithSigner(adminWallet);
-      
+
       const tx = await registryModule.updateProperty(
         matriculaId,
         endereco,
@@ -332,16 +332,138 @@ export class PropertyService {
           gasPrice: 1000
         }
       );
-      
+
       console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
       await tx.wait();
-      
+
       console.log(`✅ Propriedade atualizada!`);
       return tx.hash;
-      
+
     } catch (error: any) {
       console.error('❌ Erro ao atualizar:', error);
       throw new Error(`Falha ao atualizar: ${error.message}`);
+    }
+  }
+
+  /**
+   * Congelar ou descongelar uma propriedade
+   * Requer AGENT_ROLE
+   */
+  async freezeProperty(matriculaId: number, freeze: boolean): Promise<string> {
+    try {
+      console.log(`${freeze ? '❄️ Congelando' : '🔥 Descongelando'} propriedade ${matriculaId}...`);
+
+      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
+
+      const tx = await propertyTitle.freezeProperty(
+        matriculaId,
+        freeze,
+        {
+          type: 0,
+          gasLimit: 150000,
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Propriedade ${freeze ? 'congelada' : 'descongelada'}!`);
+      return tx.hash;
+
+    } catch (error: any) {
+      console.error(`❌ Erro ao ${freeze ? 'congelar' : 'descongelar'}:`, error);
+      throw new Error(`Falha ao ${freeze ? 'congelar' : 'descongelar'}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Congelar ou descongelar múltiplas propriedades em lote
+   * Requer AGENT_ROLE
+   */
+  async batchFreezeProperties(matriculas: number[], freeze: boolean): Promise<string> {
+    try {
+      console.log(`${freeze ? '❄️ Congelando' : '🔥 Descongelando'} ${matriculas.length} propriedades em lote...`);
+      console.log(`   Matrículas: ${matriculas.join(', ')}`);
+
+      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
+
+      const tx = await propertyTitle.batchFreezeProperties(
+        matriculas,
+        freeze,
+        {
+          type: 0,
+          gasLimit: 300000 + (matriculas.length * 50000),
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ ${matriculas.length} propriedades ${freeze ? 'congeladas' : 'descongeladas'}!`);
+      return tx.hash;
+
+    } catch (error: any) {
+      console.error('❌ Erro no batch freeze:', error);
+      throw new Error(`Falha no batch freeze: ${error.message}`);
+    }
+  }
+
+  /**
+   * Transferir propriedade forçadamente (recuperação/emergência)
+   * Requer AGENT_ROLE
+   */
+  async forcedTransferProperty(from: string, to: string, matricula: number): Promise<string> {
+    try {
+      console.log(`⚠️ Transferência forçada da matrícula ${matricula}...`);
+      console.log(`   De: ${from} → Para: ${to}`);
+
+      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
+
+      const tx = await propertyTitle.forcedTransferProperty(
+        from,
+        to,
+        matricula,
+        {
+          type: 0,
+          gasLimit: 300000,
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Transferência forçada executada!`);
+      return tx.hash;
+
+    } catch (error: any) {
+      console.error('❌ Erro na transferência forçada:', error);
+      throw new Error(`Falha na transferência forçada: ${error.message}`);
+    }
+  }
+
+  /**
+   * Contar quantas propriedades um endereço possui
+   */
+  async propertyCountOf(ownerAddress: string): Promise<number> {
+    try {
+      const count = await propertyTitleContract.propertyCountOf(ownerAddress);
+      return Number(count);
+    } catch (error: any) {
+      throw new Error(`Erro ao contar propriedades: ${error.message}`);
+    }
+  }
+
+  /**
+   * Verificar se o sistema está pausado
+   */
+  async isTransferPaused(): Promise<boolean> {
+    try {
+      return await propertyTitleContract.isTransferPaused();
+    } catch (error: any) {
+      throw new Error(`Erro ao verificar pausa: ${error.message}`);
     }
   }
 }
