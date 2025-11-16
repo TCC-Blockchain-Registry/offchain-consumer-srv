@@ -6,6 +6,10 @@ import { checkConnection, checkBalances } from './config/blockchain';
 import approversRoutes from './routes/approvers.routes';
 import propertyRoutes from './routes/property.routes';
 import transferRoutes from './routes/transfer.routes';
+import approvalRoutes from './routes/approval.routes';
+import systemRoutes from './routes/system.routes';
+import tokenRoutes from './routes/token.routes';
+import infoRoutes from './routes/info.routes';
 
 dotenv.config();
 
@@ -23,6 +27,10 @@ app.use((req, res, next) => {
 app.use('/api/approvers', approversRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/transfers', transferRoutes);
+app.use('/api/approvals', approvalRoutes);
+app.use('/api/system', systemRoutes);
+app.use('/api/tokens', tokenRoutes);
+app.use('/api/info', infoRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
@@ -134,6 +142,10 @@ async function start() {
       console.log(`   Aprovadores: http://localhost:${PORT}/api/approvers`);
       console.log(`   Propriedades: http://localhost:${PORT}/api/properties`);
       console.log(`   Transferências: http://localhost:${PORT}/api/transfers`);
+      console.log(`   Aprovações Manuais: http://localhost:${PORT}/api/approvals`);
+      console.log(`   Sistema (Pause/Agents/Freeze): http://localhost:${PORT}/api/system`);
+      console.log(`   Tokens (Mint/Burn/Transfer): http://localhost:${PORT}/api/tokens`);
+      console.log(`   Info & Config: http://localhost:${PORT}/api/info`);
       console.log('\n🎯 Pronto para receber requisições!\n');
     });
 
