@@ -4,29 +4,6 @@ import { TransferService } from '../services/transferService';
 const router = Router();
 const transferService = new TransferService();
 
-/**
- * POST /api/transfers/configure
- * PASSO 1: Configurar uma nova transferência com aprovadores
- * 
- * Este é o primeiro passo para transferir um imóvel.
- * O orquestrador configura quais aprovadores devem aprovar a transferência.
- * 
- * IMPORTANTE: 
- * - Os aprovadores devem estar registrados no ApproversRegistry
- * - Use GET /api/approvers/recommended/list para obter aprovadores sugeridos
- * 
- * Body:
- * {
- *   "from": "0x...",  // Endereço do vendedor (dono atual)
- *   "to": "0x...",    // Endereço do comprador
- *   "matriculaId": 123456,
- *   "approvers": [    // Lista de aprovadores registrados
- *     "0xCARTORIO",
- *     "0xPREFEITURA",
- *     "0xIF"
- *   ]
- * }
- */
 router.post('/configure', async (req: Request, res: Response) => {
   try {
     const { from, to, matriculaId, approvers } = req.body;
@@ -75,21 +52,6 @@ router.post('/configure', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/transfers/approve
- * PASSO 2: Aprovador registra sua aprovação
- * 
- * Cada aprovador da lista configurada deve chamar este endpoint.
- * Apenas aprovadores registrados e ativos podem aprovar.
- * 
- * Body:
- * {
- *   "from": "0x...",
- *   "to": "0x...",
- *   "matriculaId": 123456,
- *   "approverPrivateKey": "0x..."  // Private key do aprovador
- * }
- */
 router.post('/approve', async (req: Request, res: Response) => {
   try {
     const { from, to, matriculaId, approverPrivateKey } = req.body;
@@ -131,19 +93,6 @@ router.post('/approve', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/transfers/accept
- * PASSO 3: Comprador aceita a transferência
- * 
- * O comprador (to) deve aceitar a transferência após todas as aprovações.
- * 
- * Body:
- * {
- *   "from": "0x...",
- *   "matriculaId": 123456,
- *   "buyerPrivateKey": "0x..."  // Private key do comprador
- * }
- */
 router.post('/accept', async (req: Request, res: Response) => {
   try {
     const { from, matriculaId, buyerPrivateKey } = req.body;
@@ -178,21 +127,6 @@ router.post('/accept', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/transfers/execute
- * PASSO 4 (FINAL): Executar a transferência
- * 
- * O vendedor (from) executa a transferência final após:
- * - Todas as aprovações registradas
- * - Comprador aceitou
- * 
- * Body:
- * {
- *   "to": "0x...",
- *   "matriculaId": 123456,
- *   "sellerPrivateKey": "0x..."  // Private key do vendedor
- * }
- */
 router.post('/execute', async (req: Request, res: Response) => {
   try {
     const { to, matriculaId, sellerPrivateKey } = req.body;
@@ -228,15 +162,6 @@ router.post('/execute', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/transfers/status
- * Consultar status de uma transferência configurada
- * 
- * Query params:
- * - from: endereço do vendedor
- * - to: endereço do comprador
- * - matriculaId: ID da matrícula
- */
 router.get('/status', async (req: Request, res: Response) => {
   try {
     const { from, to, matriculaId } = req.query;
@@ -266,33 +191,22 @@ router.get('/status', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/transfers/details
- * Obter informações detalhadas de uma transferência
- * Inclui quem já aprovou e quem falta
- * 
- * Query params:
- * - from: endereço do vendedor
- * - to: endereço do comprador
- * - matriculaId: ID da matrícula
- */
 router.get('/details', async (req: Request, res: Response) => {
   try {
     const { from, to, matriculaId } = req.query;
-    
+
     if (!from || !to || !matriculaId) {
       return res.status(400).json({
         error: 'Parâmetros obrigatórios: from, to, matriculaId'
       });
     }
-    
+
     const details = await transferService.getTransferDetails(
       from as string,
       to as string,
       Number(matriculaId)
     );
-    
-    // Calcular próximo passo
+
     let nextStep = '';
     if (!details.config.isConfigured) {
       nextStep = 'Transferência não configurada';
@@ -321,16 +235,6 @@ router.get('/details', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/transfers/has-approved
- * Verificar se um aprovador específico já aprovou
- * 
- * Query params:
- * - from: endereço do vendedor
- * - to: endereço do comprador
- * - matriculaId: ID da matrícula
- * - approver: endereço do aprovador
- */
 router.get('/has-approved', async (req: Request, res: Response) => {
   try {
     const { from, to, matriculaId, approver } = req.query;

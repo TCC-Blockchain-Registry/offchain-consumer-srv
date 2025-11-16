@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { checkConnection, checkBalances } from './config/blockchain';
 
-// Rotas
 import approversRoutes from './routes/approvers.routes';
 import propertyRoutes from './routes/property.routes';
 import transferRoutes from './routes/transfer.routes';
@@ -13,31 +12,26 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// Log de requisições
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-// Rotas
 app.use('/api/approvers', approversRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/transfers', transferRoutes);
 
-// Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     service: 'Besu Property Ledger API'
   });
 });
 
-// Rota raiz com documentação
 app.get('/', (req, res) => {
   res.json({
     name: 'Besu Property Ledger API',
@@ -94,7 +88,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Tratamento de erros 404
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint não encontrado',
@@ -104,7 +97,6 @@ app.use((req, res) => {
   });
 });
 
-// Tratamento de erros global
 app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('Erro não tratado:', error);
   res.status(500).json({
@@ -113,23 +105,19 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
   });
 });
 
-// Inicializar aplicação
 async function start() {
   try {
     console.log('\n🚀 Iniciando Besu Property Ledger API...\n');
-    
-    // Verificar conexão com blockchain
+
     console.log('🔗 Verificando conexão com blockchain...');
     const connected = await checkConnection();
     if (!connected) {
       throw new Error('❌ Falha ao conectar com blockchain');
     }
-    
-    // Verificar saldos das contas
+
     console.log('\n💰 Verificando saldos das contas...');
     await checkBalances();
-    
-    // Verificar endereços dos contratos
+
     console.log('\n📝 Endereços dos contratos:');
     console.log(`  PropertyTitle: ${process.env.PROPERTY_TITLE_ADDRESS}`);
     console.log(`  ApprovalsModule: ${process.env.APPROVALS_MODULE_ADDRESS}`);
@@ -137,8 +125,7 @@ async function start() {
     console.log(`  ApproversRegistry: ${process.env.APPROVERS_REGISTRY_ADDRESS}`);
     console.log(`  IdentityRegistry: ${process.env.IDENTITY_REGISTRY_ADDRESS}`);
     console.log(`  Compliance: ${process.env.MODULAR_COMPLIANCE_ADDRESS}`);
-    
-    // Iniciar servidor
+
     app.listen(PORT, () => {
       console.log(`\n✅ API rodando em http://localhost:${PORT}`);
       console.log(`📖 Documentação: http://localhost:${PORT}/`);
@@ -149,7 +136,7 @@ async function start() {
       console.log(`   Transferências: http://localhost:${PORT}/api/transfers`);
       console.log('\n🎯 Pronto para receber requisições!\n');
     });
-    
+
   } catch (error: any) {
     console.error('❌ Erro ao iniciar:', error.message);
     console.error('\n💡 Verifique:');
@@ -161,7 +148,6 @@ async function start() {
   }
 }
 
-// Lidar com shutdown graceful
 process.on('SIGINT', () => {
   console.log('\n\n👋 Encerrando servidor...');
   process.exit(0);
