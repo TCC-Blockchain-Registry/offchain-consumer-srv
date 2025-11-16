@@ -1,29 +1,57 @@
-# 🏠 Besu Property Ledger - API Backend
+# Offchain Consumer Service
 
-API REST para facilitar a integração com os smart contracts de tokenização de imóveis.
+REST API and event listener for blockchain integration in the property tokenization platform.
 
-## 🚀 Quick Start
+## Overview
 
-### 1. Instalar Dependências
+The Offchain Consumer Service is the blockchain integration layer that bridges off-chain services with on-chain smart contracts. It provides a REST API for blockchain operations and an event listener that monitors blockchain events and sends webhooks to the orchestrator for real-time synchronization.
+
+This service uses Ethers.js v6 to interact with Hyperledger Besu nodes running ERC-3643 security token contracts.
+
+## Tech Stack
+
+- **Node.js 18+** - Runtime environment
+- **TypeScript** - Programming language
+- **Express** - Web framework
+- **Ethers.js v6** - Ethereum/Besu integration library
+- **Axios** - HTTP client for webhooks
+- **dotenv** - Environment configuration
+
+## Prerequisites
+
+- Node.js 18+
+- npm or yarn
+- Hyperledger Besu network running (localhost:8545)
+- Deployed smart contracts with addresses
+- jq (for ABI extraction)
+
+## Quick Start
 
 ```bash
+# Clone repository
+git clone <repository-url>
+cd offchain-consumer-srv
+
+# Install dependencies
 npm install
-```
 
-### 2. Configurar Variáveis de Ambiente
+# Copy environment template
+cp env.template .env
+# Edit .env with deployed contract addresses (see Environment Variables section)
 
-```bash
-cp .env.example .env
-# Edite .env com os endereços dos contratos deployados
-```
+# Extract ABIs from Foundry build artifacts
+# (Assumes besu-property-ledger is in parent directory)
+cd ../besu-property-ledger
+cat out/PropertyTitleTREX.sol/PropertyTitleTREX.json | jq '.abi' > ../offchain-consumer-srv/src/abis/PropertyTitleTREX.json
+cat out/ApprovalsModule.sol/ApprovalsModule.json | jq '.abi' > ../offchain-consumer-srv/src/abis/ApprovalsModule.json
+cat out/RegistryMDCompliance.sol/RegistryMDCompliance.json | jq '.abi' > ../offchain-consumer-srv/src/abis/RegistryMDCompliance.json
+cd ../offchain-consumer-srv
 
-### 3. Extrair ABIs dos Contratos
+# Run API server (development mode)
+npm run dev
 
-```bash
-# Da raiz do projeto (onde está out/)
-cat out/PropertyTitleTREX.sol/PropertyTitleTREX.json | jq '.abi' > backend-example/src/abis/PropertyTitleTREX.json
-cat out/ApprovalsModule.sol/ApprovalsModule.json | jq '.abi' > backend-example/src/abis/ApprovalsModule.json
-cat out/RegistryMDCompliance.sol/RegistryMDCompliance.json | jq '.abi' > backend-example/src/abis/RegistryMDCompliance.json
+# In a separate terminal, run event listener
+npm run listen:dev
 ```
 
 ### 4. Configurar Webhook (Opcional)
@@ -109,7 +137,80 @@ Veja [docs/backend/NODE_API_INTEGRATION.md](../docs/backend/NODE_API_INTEGRATION
 - Event listeners
 - Próximos passos
 
-## 🔗 Endpoints Principais
+## Running Standalone
+
+```bash
+# Development mode (API server)
+npm run dev
+
+# Development mode (Event listener)
+npm run listen:dev
+
+# Production build
+npm run build
+npm start
+
+# Production event listener
+npm run listen
+```
+
+## Environment Variables
+
+The service requires extensive configuration via `env.template`:
+
+### Blockchain Connection
+
+```env
+RPC_URL=http://127.0.0.1:8545
+CHAIN_ID=1337
+```
+
+### Private Keys (Development Only)
+
+```env
+ADMIN_PRIVATE_KEY=0x...     # AGENT_ROLE + DEFAULT_ADMIN_ROLE
+ORCHESTRATOR_PRIVATE_KEY=0x...  # ORCHESTRATOR_ROLE
+REGISTRAR_PRIVATE_KEY=0x...     # REGISTRAR_ROLE
+```
+
+**WARNING**: Never commit private keys to version control. Use environment variable injection in production.
+
+### Contract Addresses
+
+```env
+PROPERTY_TITLE_ADDRESS=0x...
+APPROVALS_MODULE_ADDRESS=0x...
+REGISTRY_MODULE_ADDRESS=0x...
+APPROVERS_REGISTRY_ADDRESS=0x...
+IDENTITY_REGISTRY_ADDRESS=0x...
+MODULAR_COMPLIANCE_ADDRESS=0x...
+```
+
+These addresses are obtained from `deployed-addresses.txt` after running contract deployment in besu-property-ledger.
+
+### Webhook Configuration (Optional)
+
+```env
+WEBHOOK_URL=https://api.orchestrator.com/webhook
+WEBHOOK_API_KEY=your-api-key-here
+```
+
+## Integration with Other Services
+
+The Offchain Consumer integrates with:
+
+1. **Hyperledger Besu** (port 8545) - Blockchain network via JSON-RPC
+2. **Queue Worker** - Receives job requests via HTTP
+3. **Core Orchestrator** - Sends event webhooks for synchronization
+
+**Architecture**:
+```
+Queue Worker → HTTP → Offchain API → JSON-RPC → Blockchain
+                                   ↓ Events
+                          Webhook → Orchestrator
+```
+
+## API Endpoints
 
 ### Propriedades
 - `POST /api/properties/register` - Registrar novo imóvel
@@ -149,3 +250,109 @@ curl http://localhost:3000/api/properties/123456
 # Health check
 curl http://localhost:3000/health
 ```
+
+## Event Listener
+
+The event listener is a separate process that monitors blockchain events and sends webhooks:
+
+### Monitored Events
+
+| Event | Contract | Description |
+|-------|----------|-------------|
+| `PROPERTY_ISSUED` | PropertyTitleTREX | New property token minted |
+| `PROPERTY_TRANSFERRED` | PropertyTitleTREX | Ownership transferred |
+| `PROPERTY_REGISTERED` | RegistryMDCompliance | Property metadata registered |
+| `TRANSFER_CONFIGURED` | ApprovalsModule | Transfer initiated with approvers |
+| `TRANSFER_APPROVED` | ApprovalsModule | Approver gave approval |
+| `BUYER_ACCEPTED` | ApprovalsModule | Buyer accepted transfer |
+| `APPROVER_REGISTERED` | ApproversRegistry | New approver entity registered |
+
+### Webhook Payload Example
+
+```json
+{
+  "eventType": "PROPERTY_TRANSFERRED",
+  "matricula": "123456",
+  "from": "0x1234...",
+  "to": "0x5678...",
+  "transactionHash": "0xabcd...",
+  "blockNumber": 12345,
+  "timestamp": "2025-01-17T10:30:00.000Z"
+}
+```
+
+## Health Check
+
+```bash
+# API health
+curl http://localhost:3000/health
+
+# Check blockchain connection
+curl http://localhost:3000/api/health
+```
+
+Expected response:
+```json
+{
+  "status": "healthy",
+  "blockchain": "connected",
+  "contracts": "loaded"
+}
+```
+
+## Troubleshooting
+
+### Cannot Connect to Blockchain
+
+**Problem**: `Error connecting to RPC`
+
+**Solution**:
+- Verify Besu network is running: `docker ps | grep besu`
+- Check RPC URL in `.env` matches Besu configuration
+- Test connection: `curl http://localhost:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'`
+
+### Contract Addresses Not Found
+
+**Problem**: `Contract address is undefined`
+
+**Solution**:
+1. Deploy contracts in besu-property-ledger
+2. Copy addresses from `deployed-addresses.txt`
+3. Update `.env` with correct addresses
+4. Restart service
+
+### ABIs Not Found
+
+**Problem**: `Cannot find module './abis/PropertyTitleTREX.json'`
+
+**Solution**:
+```bash
+cd ../besu-property-ledger
+cat out/PropertyTitleTREX.sol/PropertyTitleTREX.json | jq '.abi' > ../offchain-consumer-srv/src/abis/PropertyTitleTREX.json
+cat out/ApprovalsModule.sol/ApprovalsModule.json | jq '.abi' > ../offchain-consumer-srv/src/abis/ApprovalsModule.json
+cat out/RegistryMDCompliance.sol/RegistryMDCompliance.json | jq '.abi' > ../offchain-consumer-srv/src/abis/RegistryMDCompliance.json
+```
+
+### Transaction Reverted
+
+**Problem**: `Transaction reverted without a reason`
+
+**Solution**:
+- Check wallet has ETH for gas (even though gas price is 0)
+- Verify wallet has required role for operation
+- Check contract is not paused
+- Verify transfer is properly configured before execution
+
+### Webhook Failures
+
+**Problem**: Event listener shows webhook errors
+
+**Solution**:
+- Verify orchestrator is running and accessible
+- Check `WEBHOOK_URL` in `.env` is correct
+- Verify `WEBHOOK_API_KEY` if authentication is required
+- Check orchestrator logs for webhook endpoint errors
+
+## License
+
+MIT

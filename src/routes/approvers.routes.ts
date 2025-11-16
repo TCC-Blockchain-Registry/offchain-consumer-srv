@@ -4,29 +4,16 @@ import { ApproversService, ApproverType } from '../services/approversService';
 const router = Router();
 const approversService = new ApproversService();
 
-/**
- * POST /api/approvers/register
- * Registrar um novo aprovador no sistema
- * 
- * Body:
- * {
- *   "wallet": "0x...",
- *   "type": 0 | 1 | 2,  // 0=CARTORIO, 1=PREFEITURA, 2=IF
- *   "name": "Nome da instituição",
- *   "document": "CNPJ"
- * }
- */
 router.post('/register', async (req: Request, res: Response) => {
   try {
     const { wallet, type, name, document } = req.body;
-    
+
     if (!wallet || type === undefined || !name || !document) {
       return res.status(400).json({
         error: 'Campos obrigatórios: wallet, type, name, document'
       });
     }
-    
-    // Validar tipo
+
     if (![0, 1, 2].includes(Number(type))) {
       return res.status(400).json({
         error: 'Tipo inválido. Use: 0=CARTORIO, 1=PREFEITURA, 2=INSTITUICAO_FINANCEIRA'
@@ -60,10 +47,6 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/approvers/validate/:wallet
- * Verificar se um endereço é um aprovador válido
- */
 router.get('/validate/:wallet', async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;
@@ -83,10 +66,6 @@ router.get('/validate/:wallet', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/approvers/:wallet
- * Obter informações completas de um aprovador
- */
 router.get('/:wallet', async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;
@@ -109,21 +88,12 @@ router.get('/:wallet', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/approvers
- * Listar todos os aprovadores ou filtrar por tipo
- * 
- * Query params:
- * - type: 0 | 1 | 2 (opcional)
- * - activeOnly: true | false (opcional, padrão: false)
- */
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { type, activeOnly } = req.query;
-    
+
     let approvers: string[];
-    
-    // Filtrar por tipo
+
     if (type !== undefined) {
       const approverType = Number(type) as ApproverType;
       if (![0, 1, 2].includes(approverType)) {
@@ -133,16 +103,13 @@ router.get('/', async (req: Request, res: Response) => {
       }
       approvers = await approversService.getApproversByType(approverType);
     }
-    // Apenas ativos
     else if (activeOnly === 'true') {
       approvers = await approversService.getActiveApprovers();
     }
-    // Todos
     else {
       approvers = await approversService.getAllApprovers();
     }
-    
-    // Buscar informações detalhadas de cada aprovador
+
     const approversInfo = await Promise.all(
       approvers.map(async (wallet) => {
         try {
@@ -157,8 +124,7 @@ router.get('/', async (req: Request, res: Response) => {
         }
       })
     );
-    
-    // Filtrar nulos
+
     const validApprovers = approversInfo.filter(info => info !== null);
     
     res.json({
@@ -175,16 +141,10 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/approvers/recommended/list
- * Obter aprovadores recomendados para uma transferência
- * Retorna 1 de cada tipo se disponível
- */
 router.get('/recommended/list', async (req: Request, res: Response) => {
   try {
     const recommended = await approversService.getRecommendedApprovers();
-    
-    // Buscar informações de cada um
+
     const details: any = {};
     
     if (recommended.cartorio) {
@@ -201,8 +161,7 @@ router.get('/recommended/list', async (req: Request, res: Response) => {
       details.instituicaoFinanceira = await approversService.getApproverInfo(recommended.instituicaoFinanceira);
       details.instituicaoFinanceira.typeName = 'INSTITUICAO_FINANCEIRA';
     }
-    
-    // Lista de endereços para usar no configureTransfer
+
     const approversList = [
       recommended.cartorio,
       recommended.prefeitura,
@@ -224,15 +183,6 @@ router.get('/recommended/list', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/approvers/validate-list
- * Validar se uma lista de aprovadores são todos válidos
- * 
- * Body:
- * {
- *   "approvers": ["0x...", "0x...", ...]
- * }
- */
 router.post('/validate-list', async (req: Request, res: Response) => {
   try {
     const { approvers } = req.body;
@@ -259,10 +209,6 @@ router.post('/validate-list', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/approvers/:wallet/deactivate
- * Desativar um aprovador
- */
 router.post('/:wallet/deactivate', async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;
@@ -283,10 +229,6 @@ router.post('/:wallet/deactivate', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/approvers/:wallet/reactivate
- * Reativar um aprovador
- */
 router.post('/:wallet/reactivate', async (req: Request, res: Response) => {
   try {
     const { wallet } = req.params;

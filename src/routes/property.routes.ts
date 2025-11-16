@@ -4,27 +4,6 @@ import { PropertyService, PropertyType } from '../services/propertyService';
 const router = Router();
 const propertyService = new PropertyService();
 
-/**
- * POST /api/properties/register
- * Registrar um novo imóvel (fluxo completo)
- * 
- * Este endpoint executa:
- * 1. Registra propriedade no RegistryMDCompliance
- * 2. Emite título no PropertyTitleTREX
- * 
- * Body:
- * {
- *   "matriculaId": 123456,
- *   "folha": 100,
- *   "comarca": "São Paulo",
- *   "endereco": "Rua Exemplo, 123",
- *   "metragem": 150,
- *   "proprietario": "0x...",
- *   "matriculaOrigem": 0,
- *   "tipo": 0,  // 0=URBANO, 1=RURAL, 2=LITORAL
- *   "isRegular": true
- * }
- */
 router.post('/register', async (req: Request, res: Response) => {
   try {
     const {
@@ -38,15 +17,13 @@ router.post('/register', async (req: Request, res: Response) => {
       tipo = PropertyType.URBANO,
       isRegular = true
     } = req.body;
-    
-    // Validações básicas
+
     if (!matriculaId || !proprietario || !endereco) {
       return res.status(400).json({
         error: 'Campos obrigatórios: matriculaId, proprietario, endereco'
       });
     }
-    
-    // Validar tipo
+
     if (![0, 1, 2].includes(Number(tipo))) {
       return res.status(400).json({
         error: 'Tipo inválido. Use: 0=URBANO, 1=RURAL, 2=LITORAL'
@@ -84,11 +61,6 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/:matriculaId
- * Consultar dados completos de um imóvel
- * Retorna informações do compliance + token
- */
 router.get('/:matriculaId', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -113,10 +85,6 @@ router.get('/:matriculaId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/compliance/:matriculaId
- * Consultar apenas dados do módulo de compliance
- */
 router.get('/compliance/:matriculaId', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -138,16 +106,11 @@ router.get('/compliance/:matriculaId', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/owner/:address
- * Listar todas as propriedades de um dono
- */
 router.get('/owner/:address', async (req: Request, res: Response) => {
   try {
     const { address } = req.params;
     const matriculas = await propertyService.getPropertiesOfOwner(address);
-    
-    // Buscar detalhes de cada propriedade
+
     const properties = await Promise.all(
       matriculas.map(async (matriculaId) => {
         try {
@@ -176,10 +139,6 @@ router.get('/owner/:address', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/:matriculaId/owner
- * Verificar quem é o dono atual de uma propriedade
- */
 router.get('/:matriculaId/owner', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -199,10 +158,6 @@ router.get('/:matriculaId/owner', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/:matriculaId/exists
- * Verificar se uma propriedade existe
- */
 router.get('/:matriculaId/exists', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -222,10 +177,6 @@ router.get('/:matriculaId/exists', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /api/properties/:matriculaId/frozen
- * Verificar se uma propriedade está congelada
- */
 router.get('/:matriculaId/frozen', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -246,17 +197,6 @@ router.get('/:matriculaId/frozen', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * PUT /api/properties/:matriculaId
- * Atualizar informações cadastrais de uma propriedade
- * 
- * Body:
- * {
- *   "endereco": "Novo endereço",
- *   "metragem": 200,
- *   "isRegular": true
- * }
- */
 router.put('/:matriculaId', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
