@@ -6,11 +6,6 @@
         "name": "admin",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "_approversRegistry",
-        "type": "address",
-        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -51,7 +46,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -79,7 +74,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -91,19 +86,6 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "approversRegistry",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -152,7 +134,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -204,7 +186,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -215,11 +197,6 @@
       }
     ],
     "outputs": [
-      {
-        "name": "matricula",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
       {
         "name": "requiredApprovers",
         "type": "address[]",
@@ -276,7 +253,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -389,7 +366,7 @@
         "internalType": "address"
       },
       {
-        "name": "",
+        "name": "_value",
         "type": "uint256",
         "internalType": "uint256"
       },
@@ -441,7 +418,7 @@
         "internalType": "address"
       },
       {
-        "name": "",
+        "name": "_value",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -491,19 +468,6 @@
       },
       {
         "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setApproversRegistry",
-    "inputs": [
-      {
-        "name": "_approversRegistry",
         "type": "address",
         "internalType": "address"
       }
@@ -570,25 +534,6 @@
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "ApproversRegistrySet",
-    "inputs": [
-      {
-        "name": "oldRegistry",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "newRegistry",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -749,7 +694,7 @@
         "internalType": "address"
       },
       {
-        "name": "matriculaId",
+        "name": "value",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
