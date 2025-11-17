@@ -7,9 +7,12 @@ import approversRoutes from './routes/approvers.routes';
 import propertyRoutes from './routes/property.routes';
 import transferRoutes from './routes/transfer.routes';
 import approvalRoutes from './routes/approval.routes';
+import approvalsV2Routes from './routes/approvals.routes';
 import systemRoutes from './routes/system.routes';
 import tokenRoutes from './routes/token.routes';
 import infoRoutes from './routes/info.routes';
+import identityRoutes from './routes/identity.routes';
+import setupRoutes from './routes/setup.routes';
 
 dotenv.config();
 
@@ -28,9 +31,12 @@ app.use('/api/approvers', approversRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/approvals', approvalRoutes);
+app.use('/api/approvals/v2', approvalsV2Routes);
 app.use('/api/system', systemRoutes);
 app.use('/api/tokens', tokenRoutes);
 app.use('/api/info', infoRoutes);
+app.use('/api/identity', identityRoutes);
+app.use('/api/setup', setupRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
@@ -75,6 +81,23 @@ app.get('/', (req, res) => {
         status: 'GET /api/transfers/status',
         details: 'GET /api/transfers/details',
         hasApproved: 'GET /api/transfers/has-approved'
+      },
+      identity: {
+        register: 'POST /api/identity/register',
+        verify: 'GET /api/identity/:walletAddress/verify'
+      },
+      approvalsV2: {
+        requestRegistration: 'POST /api/approvals/v2/registration/request',
+        approveFinancial: 'POST /api/approvals/v2/registration/:requestHash/financial',
+        approveRegistry: 'POST /api/approvals/v2/registration/:requestHash/registry-office',
+        approveMunicipality: 'POST /api/approvals/v2/registration/:requestHash/municipality (AUTO-EXECUTA)',
+        registrationStatus: 'GET /api/approvals/v2/registration/:requestHash/status',
+        requestTransfer: 'POST /api/approvals/v2/transfer/request',
+        approveTransferFinancial: 'POST /api/approvals/v2/transfer/:requestHash/financial',
+        approveTransferRegistry: 'POST /api/approvals/v2/transfer/:requestHash/registry-office',
+        approveTransferMunicipality: 'POST /api/approvals/v2/transfer/:requestHash/municipality (AUTO-EXECUTA)',
+        transferStatus: 'GET /api/approvals/v2/transfer/:requestHash/status',
+        note: '⚡ Execução é AUTOMÁTICA após a 3ª aprovação!'
       }
     },
     documentation: {
@@ -143,9 +166,11 @@ async function start() {
       console.log(`   Propriedades: http://localhost:${PORT}/api/properties`);
       console.log(`   Transferências: http://localhost:${PORT}/api/transfers`);
       console.log(`   Aprovações Manuais: http://localhost:${PORT}/api/approvals`);
+      console.log(`   Aprovações V2 (Pending): http://localhost:${PORT}/api/approvals/v2`);
       console.log(`   Sistema (Pause/Agents/Freeze): http://localhost:${PORT}/api/system`);
       console.log(`   Tokens (Mint/Burn/Transfer): http://localhost:${PORT}/api/tokens`);
       console.log(`   Info & Config: http://localhost:${PORT}/api/info`);
+      console.log(`   Identidade (Registro): http://localhost:${PORT}/api/identity`);
       console.log('\n🎯 Pronto para receber requisições!\n');
     });
 

@@ -44,12 +44,20 @@ router.post('/register', async (req: Request, res: Response) => {
     
     res.json({
       success: true,
-      message: 'Imóvel registrado e título emitido com sucesso',
+      message: 'Solicitação de registro criada com sucesso. Aguardando aprovações.',
       data: {
+        requestHash: result.requestHash,
+        txHash: result.txHash,
+        blockNumber: result.blockNumber,
         matriculaId: result.matriculaId,
-        owner: result.owner,
-        complianceTxHash: result.complianceTxHash,
-        issueTxHash: result.issueTxHash
+        beneficiary: result.beneficiary,
+        status: result.status,
+        nextSteps: [
+          'Aprovação Financial (Instituição Financeira)',
+          'Aprovação Registry Office (Cartório)',
+          'Aprovação Municipality (Prefeitura)',
+          'Execução automática após todas as aprovações'
+        ]
       }
     });
     
