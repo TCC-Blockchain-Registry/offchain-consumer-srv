@@ -167,44 +167,52 @@ export class PropertyService {
   /**
    * FLUXO COMPLETO: Registrar no compliance + Emitir título
    * Este é o endpoint principal para registrar um imóvel
+   * 
+   * NOTA: Agora usa Sistema V2 (aprovações MANUAIS) - retorna requestHash para aprovações
    */
   async registerProperty(propertyInfo: PropertyInfo): Promise<{
-    complianceTxHash: string;
-    issueTxHash: string;
+    requestHash: string;
+    txHash: string;
+    blockNumber: number;
     matriculaId: number;
-    owner: string;
+    beneficiary: string;
+    status: string;
   }> {
-    console.log(`🚀 Iniciando registro completo do imóvel ${propertyInfo.matriculaId}...`);
+    console.log(`🚀 Iniciando registro de solicitação do imóvel ${propertyInfo.matriculaId}...`);
+    console.log(`   📋 Usando Sistema V2 - Aprovações Manuais`);
     
     try {
       // Passo 0: Garantir que proprietário tem identidade registrada
       await this.ensureOwnerIdentity(propertyInfo.proprietario);
       
-      // Passo 1: Registrar no compliance
-      const complianceTxHash = await this.registerPropertyInCompliance(propertyInfo);
+      // Importar PropertyServiceV2
+      const { PropertyServiceV2 } = await import('./propertyServiceV2');
+      const propertyServiceV2 = new PropertyServiceV2();
       
-      // Aguardar um pouco para garantir propagação
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Passo 2: Emitir título
-      const issueTxHash = await this.issuePropertyTitle(
-        propertyInfo.proprietario,
-        propertyInfo.matriculaId
+      // Passo 1: Criar solicitação de registro (V2)
+      console.log(`📝 Criando solicitação de registro...`);
+      const requestResult = await propertyServiceV2.requestPropertyRegistration(
+        propertyInfo.matriculaId,
+        propertyInfo.proprietario
       );
       
-      console.log(`✅ Registro completo finalizado!`);
-      console.log(`   - Compliance TX: ${complianceTxHash}`);
-      console.log(`   - Issue TX: ${issueTxHash}`);
+      console.log(`✅ Request criado com sucesso!`);
+      console.log(`   - Request Hash: ${requestResult.requestHash}`);
+      console.log(`   - TX Hash: ${requestResult.txHash}`);
+      console.log(`   - Block: ${requestResult.blockNumber}`);
+      console.log(`   ⏳ Aguardando aprovações: Financial, Registry Office, Municipality`);
       
       return {
-        complianceTxHash,
-        issueTxHash,
+        requestHash: requestResult.requestHash,
+        txHash: requestResult.txHash,
+        blockNumber: requestResult.blockNumber,
         matriculaId: propertyInfo.matriculaId,
-        owner: propertyInfo.proprietario
+        beneficiary: propertyInfo.proprietario,
+        status: 'PENDING_APPROVALS'
       };
       
     } catch (error: any) {
-      console.error('❌ Erro no registro completo:', error);
+      console.error('❌ Erro ao criar solicitação:', error);
       throw error;
     }
   }
