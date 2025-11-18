@@ -2,10 +2,10 @@ import { ethers, Contract } from 'ethers';
 import { provider, adminWallet, orchestratorWallet, registrarWallet } from './blockchain';
 
 // Importar ABIs (você precisa ter esses arquivos em src/abis/)
-import PropertyTitleABI from '../abis/PropertyTitleTREX.json';
-import ApprovalsModuleABI from '../abis/ApprovalsModule.json';
-import RegistryModuleABI from '../abis/RegistryMDCompliance.json';
-import ApproversRegistryABI from '../abis/ApproversRegistry.json';
+const PropertyTitleABI = require('../abis/PropertyTitleTREX.json');
+const ApprovalsModuleABI = require('../abis/ApprovalsModule.json');
+const RegistryModuleABI = require('../abis/RegistryMDCompliance.json');
+const ApproversRegistryABI = require('../abis/ApproversRegistry.json');
 
 // Endereços dos contratos (obtidos do deploy)
 export const ADDRESSES = {
@@ -20,42 +20,42 @@ export const ADDRESSES = {
 // Instâncias dos contratos (read-only)
 export const propertyTitleContract = new Contract(
   ADDRESSES.propertyTitle,
-  PropertyTitleABI,
+  PropertyTitleABI.abi || PropertyTitleABI,
   provider
 );
 
 export const approvalsModuleContract = new Contract(
   ADDRESSES.approvalsModule,
-  ApprovalsModuleABI,
+  ApprovalsModuleABI.abi || ApprovalsModuleABI,
   provider
 );
 
 export const registryModuleContract = new Contract(
   ADDRESSES.registryModule,
-  RegistryModuleABI,
+  RegistryModuleABI.abi || RegistryModuleABI,
   provider
 );
 
 export const approversRegistryContract = new Contract(
   ADDRESSES.approversRegistry,
-  ApproversRegistryABI,
+  ApproversRegistryABI.abi || ApproversRegistryABI,
   provider
 );
 
 // Instâncias com signers (para escrever na blockchain)
 export function getPropertyTitleWithSigner(signer: ethers.Wallet) {
-  return new Contract(ADDRESSES.propertyTitle, PropertyTitleABI, signer);
+  return new Contract(ADDRESSES.propertyTitle, PropertyTitleABI.abi || PropertyTitleABI, signer);
 }
 
 export function getApprovalsModuleWithSigner(signer: ethers.Wallet) {
-  return new Contract(ADDRESSES.approvalsModule, ApprovalsModuleABI, signer);
+  return new Contract(ADDRESSES.approvalsModule, ApprovalsModuleABI.abi || ApprovalsModuleABI, signer);
 }
 
 export function getRegistryModuleWithSigner(signer: ethers.Wallet) {
-  return new Contract(ADDRESSES.registryModule, RegistryModuleABI, signer);
+  return new Contract(ADDRESSES.registryModule, RegistryModuleABI.abi || RegistryModuleABI, signer);
 }
 
 export function getApproversRegistryWithSigner(signer: ethers.Wallet) {
-  return new Contract(ADDRESSES.approversRegistry, ApproversRegistryABI, signer);
+  return new Contract(ADDRESSES.approversRegistry, ApproversRegistryABI.abi || ApproversRegistryABI, signer);
 }
 

@@ -136,6 +136,76 @@ export class TransferService {
   }
   
   /**
+   * ✅ CORREÇÃO: Aprovar usando admin wallet (mais seguro - não expõe private keys)
+   * O admin wallet assina a transação em nome do aprovador
+   */
+  async approveWithAdminWallet(
+    from: string,
+    to: string,
+    matriculaId: number,
+    approverAddress: string  // Apenas para validação/log
+  ): Promise<{
+    txHash: string;
+    approver: string;
+    progress: { current: number; required: number };
+  }> {
+    try {
+      console.log(`👍 Aprovando transferência via admin wallet...`);
+      console.log(`   Aprovador solicitante: ${approverAddress}`);
+      console.log(`   From: ${from}, To: ${to}, Matrícula: ${matriculaId}`);
+      
+      // Usar adminWallet que tem saldo e ORCHESTRATOR_ROLE
+      const approvalsModule = getApprovalsModuleWithSigner(adminWallet);
+      
+      const tx = await approvalsModule.approve(
+        from,
+        to,
+        matriculaId,
+        ADDRESSES.compliance,
+        {
+          type: 0,
+          gasLimit: 300000,
+          gasPrice: 1000
+        }
+      );
+      
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      const receipt = await tx.wait();
+      
+      // Buscar evento Approved para ver o progresso
+      let progress = { current: 0, required: 0 };
+      receipt.logs.find((log: any) => {
+        try {
+          const parsed = approvalsModule.interface.parseLog({
+            topics: log.topics,
+            data: log.data
+          });
+          if (parsed?.name === 'Approved') {
+            progress.current = Number(parsed.args[2]);
+            progress.required = Number(parsed.args[3]);
+            return true;
+          }
+          return false;
+        } catch {
+          return false;
+        }
+      });
+      
+      console.log(`✅ Aprovação registrada! Progresso: ${progress.current}/${progress.required}`);
+      
+      return {
+        txHash: tx.hash,
+        approver: adminWallet.address, // Quem realmente assinou
+        progress
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao aprovar:', error);
+      throw new Error(`Falha ao aprovar: ${error.message}`);
+    }
+  }
+  
+  /**
    * PASSO 3: Comprador aceita a transferência
    * O comprador (to) deve chamar esta função
    */
@@ -208,8 +278,9 @@ export class TransferService {
       const propertyTitle = getPropertyTitleWithSigner(sellerWallet);
       
       const tx = await propertyTitle.transferProperty(
-        to,
-        matriculaId,
+        sellerWallet.address,  // from
+        to,                     // to
+        matriculaId,            // matricula
         {
           type: 0,
           gasLimit: 600000,

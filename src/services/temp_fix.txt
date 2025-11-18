@@ -1,0 +1,4 @@
+import { ethers } from 'ethers';
+const PropertyTitleABI = require('../abis/PropertyTitleTREX.json');
+
+// Provider customizado para Besu
