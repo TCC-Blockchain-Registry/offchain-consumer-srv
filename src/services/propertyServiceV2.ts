@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import PropertyTitleABI from '../abis/PropertyTitleTREX.json';
+const PropertyTitleABI = require('../abis/PropertyTitleTREX.json');
 
 // Provider customizado para Besu
 class LegacyProvider extends ethers.JsonRpcProvider {
@@ -34,7 +34,7 @@ export class PropertyServiceV2 {
     
     this.propertyContract = new ethers.Contract(
       process.env.PROPERTY_TITLE_ADDRESS!,
-      PropertyTitleABI,
+      PropertyTitleABI.abi || PropertyTitleABI,
       this.adminWallet
     );
   }
