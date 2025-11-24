@@ -1,5 +1,6 @@
 services:
   offchain-api:
+    image: offchain-consumer-srv
     build:
       context: .
       dockerfile: Dockerfile

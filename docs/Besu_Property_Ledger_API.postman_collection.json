@@ -1,13 +1,239 @@
 {
 	"info": {
-		"_postman_id": "besu-property-ledger-api",
-		"name": "Besu Property Ledger API",
-		"description": "Collection completa para testar a API REST de tokenização de imóveis usando ERC-3643 (T-REX)\n\n## Fluxo Completo\n\n### 1. Setup Inicial\n- Registrar aprovadores (Cartório, Prefeitura, IF)\n\n### 2. Registrar Imóvel\n- POST /api/properties/register\n\n### 3. Transferir Imóvel (4 passos)\n- Configure → Approve (x3) → Accept → Execute\n\n## Variáveis Necessárias\n\nConfigure no Environment do Postman:\n- `baseUrl`: http://localhost:3000\n- `adminPrivateKey`: 0x51eba47406fcb3dfa80e9ff02c1a8efe1aa1552bf016e09d454e6a7502ef0c24\n- `cartorioWallet`: endereço do cartório\n- `prefeituraWallet`: endereço da prefeitura\n- `ifWallet`: endereço da IF",
+		"_postman_id": "offchain-consumer-api-v2",
+		"name": "Offchain Consumer API (V2 - Atualizado)",
+		"description": "API do Offchain Consumer para interação com smart contracts - Sistema de Aprovações V2\n\n## Arquitetura\n- Registro de propriedades requer 3 aprovações (Financial, Registry Office, Municipality)\n- Transferências requerem 3 aprovações + aceitação do comprador\n- Auto-registro de identidades (OnchainID) quando necessário\n\n## Variáveis\nConfigure no Environment:\n- `baseUrl`: http://localhost:3001\n- `requestHash`: Hash da solicitação (retornado ao criar request)\n- `matriculaId`: ID da matrícula da propriedade\n- `address`: Endereço Ethereum",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
-			"name": "Health & Info",
+			"name": "Properties",
+			"item": [
+				{
+					"name": "Registrations",
+					"item": [
+						{
+							"name": "Request Registration",
+							"request": {
+								"method": "POST",
+								"header": [{"key": "Content-Type", "value": "application/json"}],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"matriculaId\": 456,\n  \"beneficiary\": \"0x3b59b80bef76afce7d0a0d19eeef73045a87816c\"\n}"
+								},
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/approvals/request",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "approvals", "request"]
+								},
+								"description": "Solicita registro - fica pendente até 3 aprovações. Auto-registra identidade se necessário."
+							}
+						},
+						{
+							"name": "Approve - Financial",
+							"request": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/approvals/{{requestHash}}/financial",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "approvals", "{{requestHash}}", "financial"]
+								}
+							}
+						},
+						{
+							"name": "Approve - Registry Office",
+							"request": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/approvals/{{requestHash}}/registry-office",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "approvals", "{{requestHash}}", "registry-office"]
+								}
+							}
+						},
+						{
+							"name": "Approve - Municipality",
+							"request": {
+								"method": "POST",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/approvals/{{requestHash}}/municipality",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "approvals", "{{requestHash}}", "municipality"]
+								},
+								"description": "3ª aprovação - auto-executa o registro"
+							}
+						},
+						{
+							"name": "Get Status (PendingRegistration)",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/approvals/{{requestHash}}/status",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "approvals", "{{requestHash}}", "status"]
+								},
+								"description": "Consulta status de registro pendente"
+							}
+						}
+					]
+				},
+				{
+					"name": "Queries",
+					"item": [
+						{
+							"name": "Get Property Details",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/{{matriculaId}}",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "{{matriculaId}}"]
+								}
+							}
+						},
+						{
+							"name": "Get Owner",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/{{matriculaId}}/owner",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "{{matriculaId}}", "owner"]
+								}
+							}
+						},
+						{
+							"name": "Check Exists",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/{{matriculaId}}/exists",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "{{matriculaId}}", "exists"]
+								}
+							}
+						},
+						{
+							"name": "Get Properties of Owner",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/owner/{{address}}",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "owner", "{{address}}"]
+								}
+							}
+						},
+						{
+							"name": "Count Properties",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/count/{{address}}",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "count", "{{address}}"]
+								}
+							}
+						},
+						{
+							"name": "Get Compliance Status",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{baseUrl}}/api/properties/compliance/{{matriculaId}}",
+									"host": ["{{baseUrl}}"],
+									"path": ["api", "properties", "compliance", "{{matriculaId}}"]
+								}
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "Transfers",
+			"item": [
+				{
+					"name": "Request Transfer",
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"from\": \"0x3b59b80bef76afce7d0a0d19eeef73045a87816c\",\n  \"to\": \"0x1f5c1eb46d627c1fc6d426f0979784331b0b29e7\",\n  \"matriculaId\": 456\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/request",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "transfers", "request"]
+						},
+						"description": "Solicita transferência. Auto-registra identidade do comprador."
+					}
+				},
+				{
+					"name": "Approve - Financial",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/approvals/{{requestHash}}/financial",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "transfers", "approvals", "{{requestHash}}", "financial"]
+						}
+					}
+				},
+				{
+					"name": "Approve - Registry Office",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/approvals/{{requestHash}}/registry-office",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "transfers", "approvals", "{{requestHash}}", "registry-office"]
+						}
+					}
+				},
+				{
+					"name": "Approve - Municipality",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/approvals/{{requestHash}}/municipality",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "transfers", "approvals", "{{requestHash}}", "municipality"]
+						},
+						"description": "3ª aprovação - auto-executa a transferência"
+					}
+				},
+				{
+					"name": "Get Status (PendingTransfer)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/transfers/approvals/{{requestHash}}/status",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "transfers", "approvals", "{{requestHash}}", "status"]
+						},
+						"description": "Consulta status de transferência pendente"
+					}
+				}
+			]
+		},
+		{
+			"name": "Health",
 			"item": [
 				{
 					"name": "Health Check",
@@ -18,13 +244,11 @@
 							"raw": "{{baseUrl}}/health",
 							"host": ["{{baseUrl}}"],
 							"path": ["health"]
-						},
-						"description": "Verifica se a API está rodando"
-					},
-					"response": []
+						}
+					}
 				},
 				{
-					"name": "API Documentation",
+					"name": "API Info",
 					"request": {
 						"method": "GET",
 						"header": [],
@@ -32,611 +256,28 @@
 							"raw": "{{baseUrl}}/",
 							"host": ["{{baseUrl}}"],
 							"path": [""]
-						},
-						"description": "Retorna documentação completa da API com todos os endpoints"
-					},
-					"response": []
+						}
+					}
 				}
 			]
-		},
-		{
-			"name": "Approvers (Aprovadores)",
-			"item": [
-				{
-					"name": "Register Cartório",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"wallet\": \"0x1234567890123456789012345678901234567890\",\n  \"type\": 0,\n  \"name\": \"Cartório 1º Ofício de São Paulo\",\n  \"document\": \"12.345.678/0001-90\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "register"]
-						},
-						"description": "Registra um cartório no sistema.\n\nTipo: 0 = CARTORIO"
-					},
-					"response": []
-				},
-				{
-					"name": "Register Prefeitura",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"wallet\": \"0x2345678901234567890123456789012345678901\",\n  \"type\": 1,\n  \"name\": \"Prefeitura Municipal de São Paulo\",\n  \"document\": \"98.765.432/0001-00\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "register"]
-						},
-						"description": "Registra uma prefeitura no sistema.\n\nTipo: 1 = PREFEITURA"
-					},
-					"response": []
-				},
-				{
-					"name": "Register IF (Instituição Financeira)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"wallet\": \"0x3456789012345678901234567890123456789012\",\n  \"type\": 2,\n  \"name\": \"Banco do Brasil S.A.\",\n  \"document\": \"11.222.333/0001-44\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "register"]
-						},
-						"description": "Registra uma instituição financeira no sistema.\n\nTipo: 2 = INSTITUICAO_FINANCEIRA"
-					},
-					"response": []
-				},
-				{
-					"name": "List All Approvers",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers"]
-						},
-						"description": "Lista todos os aprovadores registrados"
-					},
-					"response": []
-				},
-				{
-					"name": "List Active Approvers Only",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers?activeOnly=true",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers"],
-							"query": [
-								{
-									"key": "activeOnly",
-									"value": "true"
-								}
-							]
-						},
-						"description": "Lista apenas aprovadores ativos"
-					},
-					"response": []
-				},
-				{
-					"name": "List Approvers by Type (Cartórios)",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers?type=0",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers"],
-							"query": [
-								{
-									"key": "type",
-									"value": "0",
-									"description": "0=CARTORIO, 1=PREFEITURA, 2=IF"
-								}
-							]
-						},
-						"description": "Lista apenas cartórios"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Recommended Approvers",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/recommended/list",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "recommended", "list"]
-						},
-						"description": "Retorna 1 aprovador de cada tipo (Cartório, Prefeitura, IF) para usar em transferências.\n\nUSE A LISTA `approverAddresses` NO ENDPOINT DE CONFIGURAR TRANSFERÊNCIA!"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Approver Info",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/{{cartorioWallet}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "{{cartorioWallet}}"]
-						},
-						"description": "Retorna informações completas de um aprovador"
-					},
-					"response": []
-				},
-				{
-					"name": "Validate Approver",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/validate/{{cartorioWallet}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "validate", "{{cartorioWallet}}"]
-						},
-						"description": "Verifica se um endereço é um aprovador válido e ativo"
-					},
-					"response": []
-				},
-				{
-					"name": "Validate Approvers List",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"approvers\": [\n    \"0x1234567890123456789012345678901234567890\",\n    \"0x2345678901234567890123456789012345678901\",\n    \"0x3456789012345678901234567890123456789012\"\n  ]\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/validate-list",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "validate-list"]
-						},
-						"description": "Valida se uma lista de aprovadores são todos válidos"
-					},
-					"response": []
-				},
-				{
-					"name": "Deactivate Approver",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/{{cartorioWallet}}/deactivate",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "{{cartorioWallet}}", "deactivate"]
-						},
-						"description": "Desativa um aprovador"
-					},
-					"response": []
-				},
-				{
-					"name": "Reactivate Approver",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/approvers/{{cartorioWallet}}/reactivate",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "approvers", "{{cartorioWallet}}", "reactivate"]
-						},
-						"description": "Reativa um aprovador"
-					},
-					"response": []
-				}
-			],
-			"description": "Endpoints para gerenciar aprovadores (Cartórios, Prefeituras, Instituições Financeiras)"
-		},
-		{
-			"name": "Properties (Propriedades)",
-			"item": [
-				{
-					"name": "Register Property",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"matriculaId\": 123456,\n  \"folha\": 100,\n  \"comarca\": \"São Paulo\",\n  \"endereco\": \"Rua Exemplo, 123 - Centro - São Paulo/SP\",\n  \"metragem\": 150,\n  \"proprietario\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"matriculaOrigem\": 0,\n  \"tipo\": 0,\n  \"isRegular\": true\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "register"]
-						},
-						"description": "Registra um novo imóvel (fluxo completo).\n\nExecuta automaticamente:\n1. Registro no RegistryMDCompliance\n2. Emissão de título no PropertyTitleTREX\n\nTipos:\n- 0 = URBANO\n- 1 = RURAL\n- 2 = LITORAL"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Property Details",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/123456",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "123456"]
-						},
-						"description": "Retorna informações completas de um imóvel (compliance + token)"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Property Compliance Data",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/compliance/123456",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "compliance", "123456"]
-						},
-						"description": "Retorna apenas dados do módulo de compliance"
-					},
-					"response": []
-				},
-				{
-					"name": "List Properties by Owner",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/owner/0x565524f400856766f11562832eB809d889491a01",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "owner", "0x565524f400856766f11562832eB809d889491a01"]
-						},
-						"description": "Lista todos os imóveis de um proprietário"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Property Owner",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/123456/owner",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "123456", "owner"]
-						},
-						"description": "Retorna quem é o dono atual de um imóvel"
-					},
-					"response": []
-				},
-				{
-					"name": "Check if Property Exists",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/123456/exists",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "123456", "exists"]
-						},
-						"description": "Verifica se um imóvel existe"
-					},
-					"response": []
-				},
-				{
-					"name": "Check if Property is Frozen",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/123456/frozen",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "123456", "frozen"]
-						},
-						"description": "Verifica se um imóvel está congelado"
-					},
-					"response": []
-				},
-				{
-					"name": "Update Property",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"endereco\": \"Rua Exemplo, 123 - Atualizado\",\n  \"metragem\": 200,\n  \"isRegular\": true\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/properties/123456",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "properties", "123456"]
-						},
-						"description": "Atualiza informações cadastrais de um imóvel"
-					},
-					"response": []
-				}
-			],
-			"description": "Endpoints para gerenciar propriedades (imóveis)"
-		},
-		{
-			"name": "Transfers (Transferências)",
-			"item": [
-				{
-					"name": "1. Configure Transfer",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"from\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"to\": \"0x1234567890123456789012345678901234567890\",\n  \"matriculaId\": 123456,\n  \"approvers\": [\n    \"0xCARTORIO\",\n    \"0xPREFEITURA\",\n    \"0xIF\"\n  ]\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/configure",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "configure"]
-						},
-						"description": "**PASSO 1:** Configura uma transferência com lista de aprovadores.\n\n💡 **Dica:** Use GET /api/approvers/recommended/list para obter a lista de aprovadores automaticamente.\n\n**IMPORTANTE:** Todos os aprovadores devem estar registrados no ApproversRegistry!"
-					},
-					"response": []
-				},
-				{
-					"name": "2. Approve - Cartório",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"from\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"to\": \"0x1234567890123456789012345678901234567890\",\n  \"matriculaId\": 123456,\n  \"approverPrivateKey\": \"0xCARTORIO_PRIVATE_KEY\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/approve",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "approve"]
-						},
-						"description": "**PASSO 2.1:** Cartório aprova a transferência"
-					},
-					"response": []
-				},
-				{
-					"name": "2. Approve - Prefeitura",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"from\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"to\": \"0x1234567890123456789012345678901234567890\",\n  \"matriculaId\": 123456,\n  \"approverPrivateKey\": \"0xPREFEITURA_PRIVATE_KEY\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/approve",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "approve"]
-						},
-						"description": "**PASSO 2.2:** Prefeitura aprova a transferência"
-					},
-					"response": []
-				},
-				{
-					"name": "2. Approve - IF",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"from\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"to\": \"0x1234567890123456789012345678901234567890\",\n  \"matriculaId\": 123456,\n  \"approverPrivateKey\": \"0xIF_PRIVATE_KEY\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/approve",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "approve"]
-						},
-						"description": "**PASSO 2.3:** Instituição Financeira aprova a transferência"
-					},
-					"response": []
-				},
-				{
-					"name": "3. Accept Transfer (Buyer)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"from\": \"0x565524f400856766f11562832eB809d889491a01\",\n  \"matriculaId\": 123456,\n  \"buyerPrivateKey\": \"0xBUYER_PRIVATE_KEY\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/accept",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "accept"]
-						},
-						"description": "**PASSO 3:** Comprador aceita a transferência"
-					},
-					"response": []
-				},
-				{
-					"name": "4. Execute Transfer (Seller)",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"to\": \"0x1234567890123456789012345678901234567890\",\n  \"matriculaId\": 123456,\n  \"sellerPrivateKey\": \"{{adminPrivateKey}}\"\n}"
-						},
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/execute",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "execute"]
-						},
-						"description": "**PASSO 4 (FINAL):** Vendedor executa a transferência.\n\nSó funciona se:\n✅ Todas aprovações registradas\n✅ Comprador aceitou\n✅ Propriedade regular"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Transfer Status",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/status?from=0x565524f400856766f11562832eB809d889491a01&to=0x1234567890123456789012345678901234567890&matriculaId=123456",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "status"],
-							"query": [
-								{
-									"key": "from",
-									"value": "0x565524f400856766f11562832eB809d889491a01"
-								},
-								{
-									"key": "to",
-									"value": "0x1234567890123456789012345678901234567890"
-								},
-								{
-									"key": "matriculaId",
-									"value": "123456"
-								}
-							]
-						},
-						"description": "Retorna status básico da transferência"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Transfer Details",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/details?from=0x565524f400856766f11562832eB809d889491a01&to=0x1234567890123456789012345678901234567890&matriculaId=123456",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "details"],
-							"query": [
-								{
-									"key": "from",
-									"value": "0x565524f400856766f11562832eB809d889491a01"
-								},
-								{
-									"key": "to",
-									"value": "0x1234567890123456789012345678901234567890"
-								},
-								{
-									"key": "matriculaId",
-									"value": "123456"
-								}
-							]
-						},
-						"description": "Retorna detalhes completos incluindo:\n- Quem já aprovou ✅\n- Quem falta aprovar ⏳\n- Se comprador aceitou\n- Se está pronta para executar\n- Próximo passo"
-					},
-					"response": []
-				},
-				{
-					"name": "Check if Approver Approved",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/transfers/has-approved?from=0x565524f400856766f11562832eB809d889491a01&to=0x1234567890123456789012345678901234567890&matriculaId=123456&approver={{cartorioWallet}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "transfers", "has-approved"],
-							"query": [
-								{
-									"key": "from",
-									"value": "0x565524f400856766f11562832eB809d889491a01"
-								},
-								{
-									"key": "to",
-									"value": "0x1234567890123456789012345678901234567890"
-								},
-								{
-									"key": "matriculaId",
-									"value": "123456"
-								},
-								{
-									"key": "approver",
-									"value": "{{cartorioWallet}}"
-								}
-							]
-						},
-						"description": "Verifica se um aprovador específico já aprovou"
-					},
-					"response": []
-				}
-			],
-			"description": "Endpoints para gerenciar transferências de imóveis (4 passos: Configure → Approve → Accept → Execute)"
 		}
 	],
 	"variable": [
 		{
 			"key": "baseUrl",
-			"value": "http://localhost:3000",
-			"type": "string"
+			"value": "http://localhost:3001"
+		},
+		{
+			"key": "requestHash",
+			"value": "0x..."
+		},
+		{
+			"key": "matriculaId",
+			"value": "456"
+		},
+		{
+			"key": "address",
+			"value": "0x3b59b80bef76afce7d0a0d19eeef73045a87816c"
 		}
 	]
 }
-

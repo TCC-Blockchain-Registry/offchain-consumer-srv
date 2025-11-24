@@ -1,5 +1,7 @@
 import { ethers } from 'ethers';
-import IdentityRegistryABI from '../abis/IdentityRegistry.json';
+
+const IdentityRegistryABI = require('../abis/IdentityRegistry.json');
+const IdentityABI = require('../abis/Identity.json');
 
 // Provider customizado para Besu
 class LegacyProvider extends ethers.JsonRpcProvider {
@@ -16,111 +18,125 @@ class LegacyProvider extends ethers.JsonRpcProvider {
   }
 }
 
-export interface RegisterIdentityResult {
-  success: boolean;
-  txHash?: string;
-  blockNumber?: number;
-  alreadyRegistered?: boolean;
-}
+/**
+ * IdentityService - Gerencia registro e verificação de identidades
+ */
+export class IdentityService {
+  private provider: LegacyProvider;
+  private adminWallet: ethers.Wallet;
+  private identityRegistry: ethers.Contract;
 
-export async function registerIdentity(walletAddress: string): Promise<RegisterIdentityResult> {
-  try {
-    console.log(`\n🔐 Registrando identidade para: ${walletAddress}\n`);
-
-    // Setup provider e admin wallet
-    const provider = new LegacyProvider(process.env.RPC_URL!, {
+  constructor() {
+    this.provider = new LegacyProvider(process.env.RPC_URL!, {
       chainId: Number(process.env.CHAIN_ID) || 1337,
       name: 'besu-private',
     });
 
-    const adminWallet = new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY!, provider);
-    console.log(`👤 Admin wallet: ${adminWallet.address}`);
+    this.adminWallet = new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY!, this.provider);
 
-    // Carregar contrato Identity Registry
-    const identityRegistry = new ethers.Contract(
+    this.identityRegistry = new ethers.Contract(
       process.env.IDENTITY_REGISTRY_ADDRESS!,
-      IdentityRegistryABI,
-      adminWallet
+      IdentityRegistryABI.abi || IdentityRegistryABI,
+      this.adminWallet
     );
+  }
 
-    // Verificar se já está registrado
-    console.log(`\n📋 Verificando identidade existente...`);
-    const isVerified = await identityRegistry.isVerified(walletAddress);
-    
-    if (isVerified) {
-      console.log(`✅ Wallet já tem identidade registrada!`);
-      return { success: true, alreadyRegistered: true };
+  /**
+   * Verifica se um endereço está registrado no IdentityRegistry
+   */
+  async isVerified(address: string): Promise<boolean> {
+    try {
+      const verified = await this.identityRegistry.isVerified(address);
+      return verified;
+    } catch (error: any) {
+      console.error(`❌ Erro ao verificar identidade de ${address}:`, error.message);
+      throw error;
     }
+  }
 
-    console.log(`📝 Registrando nova identidade...`);
-    
-    // Buscar o identity contract do admin como template
-    const adminIdentity = await identityRegistry.identity(adminWallet.address);
-    console.log(`   Usando identity contract template: ${adminIdentity}`);
-    
-    if (adminIdentity === ethers.ZeroAddress) {
-      throw new Error('Admin wallet não tem identity contract configurado');
+  /**
+   * Registra uma nova identidade (deploy OnchainID + register no IdentityRegistry)
+   */
+  async registerIdentity(userAddress: string, countryCode: number = 76): Promise<{
+    success: boolean;
+    identityAddress: string;
+    txHash: string;
+  }> {
+    try {
+      console.log(`📝 Registrando identidade para ${userAddress}...`);
+
+      // 1. Deploy OnchainID contract para o usuário
+      console.log(`   🔨 Deployando contrato OnchainID...`);
+      const identityFactory = new ethers.ContractFactory(
+        IdentityABI.abi || IdentityABI,
+        IdentityABI.bytecode,
+        this.adminWallet
+      );
+
+      const identityContract = await identityFactory.deploy(
+        userAddress,
+        false, // isLibrary = false
+        {
+          type: 0,
+          gasLimit: 3000000,
+          gasPrice: 1000
+        }
+      );
+
+      await identityContract.waitForDeployment();
+      const identityAddress = await identityContract.getAddress();
+      console.log(`   ✅ OnchainID deployed: ${identityAddress}`);
+
+      // 2. Registrar no IdentityRegistry
+      console.log(`   📋 Registrando no IdentityRegistry...`);
+      const tx = await this.identityRegistry.registerIdentity(
+        userAddress,
+        identityAddress,
+        countryCode,
+        {
+          type: 0,
+          gasLimit: 500000,
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`   ⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Identidade registrada com sucesso!`);
+      console.log(`   Usuário: ${userAddress}`);
+      console.log(`   OnchainID: ${identityAddress}`);
+
+      return {
+        success: true,
+        identityAddress,
+        txHash: tx.hash
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Erro ao registrar identidade:`, {
+        message: error.message,
+        reason: error.reason,
+        code: error.code
+      });
+      throw new Error(`Falha ao registrar identidade: ${error.reason || error.message}`);
     }
-    
-    // Registrar identidade usando o mesmo identity contract do admin
-    // NOTA: Em produção, cada usuário deveria ter seu próprio identity contract
-    const tx = await identityRegistry.registerIdentity(
-      walletAddress,
-      adminIdentity, // Reutilizar o identity contract do admin para desenvolvimento
-      76, // Country code: Brasil
-      {
-        type: 0,
-        gasLimit: 300000,
-        gasPrice: 1000
-      }
-    );
+  }
 
-    console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-    const receipt = await tx.wait();
-    
-    console.log(`✅ Identidade registrada com sucesso!`);
-    console.log(`   Block: ${receipt.blockNumber}`);
-    console.log(`   TX Hash: ${tx.hash}\n`);
+  /**
+   * Verifica e registra identidade automaticamente se necessário
+   */
+  async ensureIdentityRegistered(address: string): Promise<void> {
+    const isVerified = await this.isVerified(address);
 
-    return {
-      success: true,
-      txHash: tx.hash,
-      blockNumber: receipt.blockNumber,
-      alreadyRegistered: false
-    };
-
-  } catch (error: any) {
-    console.error(`❌ Erro ao registrar identidade:`, error.message);
-    throw error;
+    if (!isVerified) {
+      console.log(`⚠️  Identidade não registrada para ${address}`);
+      console.log(`   🔄 Registrando automaticamente...`);
+      await this.registerIdentity(address);
+    } else {
+      console.log(`   ✓ Identidade já verificada: ${address}`);
+    }
   }
 }
 
-export async function verifyIdentity(walletAddress: string): Promise<{ isVerified: boolean; identityContract: string }> {
-  try {
-    const provider = new LegacyProvider(process.env.RPC_URL!, {
-      chainId: Number(process.env.CHAIN_ID) || 1337,
-      name: 'besu-private',
-    });
-
-    const adminWallet = new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY!, provider);
-    
-    const identityRegistry = new ethers.Contract(
-      process.env.IDENTITY_REGISTRY_ADDRESS!,
-      IdentityRegistryABI,
-      adminWallet
-    );
-
-    const isVerified = await identityRegistry.isVerified(walletAddress);
-    const identity = await identityRegistry.identity(walletAddress);
-
-    return {
-      isVerified,
-      identityContract: identity
-    };
-
-  } catch (error: any) {
-    console.error(`❌ Erro ao verificar identidade:`, error.message);
-    throw error;
-  }
-}
-
+export const identityService = new IdentityService();

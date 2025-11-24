@@ -1,358 +1,631 @@
 # Offchain Consumer Service
 
-REST API and event listener for blockchain integration in the property tokenization platform.
+API REST para integração com os smart contracts ERC-3643 (T-REX) do sistema de tokenização de imóveis.
 
-## Overview
+## 📋 Visão Geral
 
-The Offchain Consumer Service is the blockchain integration layer that bridges off-chain services with on-chain smart contracts. It provides a REST API for blockchain operations and an event listener that monitors blockchain events and sends webhooks to the orchestrator for real-time synchronization.
+Este serviço atua como camada de integração entre o backend (Orchestrator) e a blockchain Hyperledger Besu, executando transações e consultando dados dos contratos inteligentes.
 
-This service uses Ethers.js v6 to interact with Hyperledger Besu nodes running ERC-3643 security token contracts.
+### Arquitetura V2 (Atual)
 
-## Tech Stack
+O sistema utiliza **aprovação integrada** diretamente nos smart contracts:
 
-- **Node.js 18+** - Runtime environment
-- **TypeScript** - Programming language
-- **Express** - Web framework
-- **Ethers.js v6** - Ethereum/Besu integration library
-- **Axios** - HTTP client for webhooks
-- **dotenv** - Environment configuration
+```
+Orchestrator → RabbitMQ → Queue Worker → Offchain Consumer → Blockchain
+                                             ↑
+                                             │
+Orchestrator ← Webhook ← Event Listener ──────┘
+```
 
-## Prerequisites
+**Características:**
+- ✅ Aprovações integradas no `PropertyTitleTREX.sol`
+- ✅ Sistema baseado em `requestHash` (identificador único)
+- ✅ Execução **automática** quando todas as 3 aprovações são recebidas
+- ✅ Não requer chamada manual de `execute()`
+
+## 🚀 Início Rápido
+
+### Pré-requisitos
 
 - Node.js 18+
-- npm or yarn
-- Hyperledger Besu network running (localhost:8545)
-- Deployed smart contracts with addresses
-- jq (for ABI extraction)
+- Blockchain Besu rodando (porta 8545)
+- Contratos deployados
 
-## Quick Start
+### Instalação
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd offchain-consumer-srv
-
-# Install dependencies
 npm install
-
-# Copy environment template
-cp env.template .env
-# Edit .env with deployed contract addresses (see Environment Variables section)
-
-# Extract ABIs from Foundry build artifacts
-# (Assumes besu-property-ledger is in parent directory)
-cd ../besu-property-ledger
-cat out/PropertyTitleTREX.sol/PropertyTitleTREX.json | jq '.abi' > ../offchain-consumer-srv/src/abis/PropertyTitleTREX.json
-cat out/ApprovalsModule.sol/ApprovalsModule.json | jq '.abi' > ../offchain-consumer-srv/src/abis/ApprovalsModule.json
-cat out/RegistryMDCompliance.sol/RegistryMDCompliance.json | jq '.abi' > ../offchain-consumer-srv/src/abis/RegistryMDCompliance.json
-cd ../offchain-consumer-srv
-
-# Run API server (development mode)
-npm run dev
-
-# In a separate terminal, run event listener
-npm run listen:dev
 ```
 
-### 4. Configurar Webhook (Opcional)
+### Configuração
 
-Adicione ao `.env`:
-
-```bash
-# Webhook do Orquestrador
-WEBHOOK_URL=https://api.orquestrador.com/webhook
-WEBHOOK_API_KEY=seu-api-key-aqui
-
-# Endereço do ApproversRegistry
-APPROVERS_REGISTRY_ADDRESS=0x...
-```
-
-### 5. Rodar Event Listener
-
-```bash
-# Event listener (escuta eventos da blockchain)
-npm run listen
-
-# OU com auto-reload
-npm run listen:dev
-```
-
-### 6. Rodar API em Desenvolvimento
-
-```bash
-npm run dev
-```
-
-A API estará disponível em `http://localhost:3000`
-
----
-
-## 🎧 Event Listener (NOVO!)
-
-O **event listener** escuta eventos da blockchain e envia notificações para o webhook do orquestrador em tempo real.
-
-### Eventos Monitorados
-
-| Evento | Quando | Payload |
-|--------|--------|---------|
-| `PROPERTY_ISSUED` | Título emitido | `matricula`, `owner` |
-| `PROPERTY_TRANSFERRED` | Transferência concluída | `matricula`, `from`, `to` |
-| `PROPERTY_REGISTERED` | Cadastro registrado | `matricula`, `folha`, `comarca`, etc |
-| `TRANSFER_CONFIGURED` | Transferência configurada | `from`, `to`, `matricula`, `requiredApprovers` |
-| `TRANSFER_APPROVED` | Aprovação recebida | `transferHash`, `approver`, `progress` |
-| `BUYER_ACCEPTED` | Comprador aceitou | `transferHash`, `buyer` |
-| `APPROVER_REGISTERED` | Aprovador registrado | `wallet`, `type`, `name` |
-
-### Exemplo de Payload do Webhook
-
-```json
-{
-  "eventType": "PROPERTY_TRANSFERRED",
-  "matricula": "123456",
-  "from": "0x1234...",
-  "to": "0x5678...",
-  "transactionHash": "0xabcd...",
-  "blockNumber": 12345,
-  "timestamp": "2025-01-17T10:30:00.000Z"
-}
-```
-
-### Como Funciona
-
-```
-Blockchain Events → Event Listener → Webhook Orquestrador
-     (on-chain)         (backend)          (seu sistema)
-```
-
-📖 **[Documentação Completa de Eventos](../docs/backend/EVENTOS_WEBHOOK.md)**
-
----
-
-## 📖 Documentação Completa
-
-Veja [docs/backend/NODE_API_INTEGRATION.md](../docs/backend/NODE_API_INTEGRATION.md) para:
-- Guia completo de setup
-- Exemplos de código
-- Todos os endpoints disponíveis
-- Event listeners
-- Próximos passos
-
-## Running Standalone
-
-```bash
-# Development mode (API server)
-npm run dev
-
-# Development mode (Event listener)
-npm run listen:dev
-
-# Production build
-npm run build
-npm start
-
-# Production event listener
-npm run listen
-```
-
-## Environment Variables
-
-The service requires extensive configuration via `env.template`:
-
-### Blockchain Connection
+Crie um arquivo `.env` na raiz do projeto:
 
 ```env
-RPC_URL=http://127.0.0.1:8545
+# Blockchain RPC
+RPC_URL=http://localhost:8545
 CHAIN_ID=1337
-```
 
-### Private Keys (Development Only)
+# Wallets (Private Keys)
+ADMIN_PRIVATE_KEY=0x...
+ORCHESTRATOR_PRIVATE_KEY=0x...
+REGISTRAR_PRIVATE_KEY=0x...
 
-```env
-ADMIN_PRIVATE_KEY=0x...     # AGENT_ROLE + DEFAULT_ADMIN_ROLE
-ORCHESTRATOR_PRIVATE_KEY=0x...  # ORCHESTRATOR_ROLE
-REGISTRAR_PRIVATE_KEY=0x...     # REGISTRAR_ROLE
-```
-
-**WARNING**: Never commit private keys to version control. Use environment variable injection in production.
-
-### Contract Addresses
-
-```env
+# Endereços dos Contratos
 PROPERTY_TITLE_ADDRESS=0x...
-APPROVALS_MODULE_ADDRESS=0x...
 REGISTRY_MODULE_ADDRESS=0x...
-APPROVERS_REGISTRY_ADDRESS=0x...
 IDENTITY_REGISTRY_ADDRESS=0x...
 MODULAR_COMPLIANCE_ADDRESS=0x...
+
+# API Config
+PORT=3000
+NODE_ENV=development
 ```
 
-These addresses are obtained from `deployed-addresses.txt` after running contract deployment in besu-property-ledger.
-
-### Webhook Configuration (Optional)
-
-```env
-WEBHOOK_URL=https://api.orchestrator.com/webhook
-WEBHOOK_API_KEY=your-api-key-here
-```
-
-## Integration with Other Services
-
-The Offchain Consumer integrates with:
-
-1. **Hyperledger Besu** (port 8545) - Blockchain network via JSON-RPC
-2. **Queue Worker** - Receives job requests via HTTP
-3. **Core Orchestrator** - Sends event webhooks for synchronization
-
-**Architecture**:
-```
-Queue Worker → HTTP → Offchain API → JSON-RPC → Blockchain
-                                   ↓ Events
-                          Webhook → Orchestrator
-```
-
-## API Endpoints
-
-### Propriedades
-- `POST /api/properties/register` - Registrar novo imóvel
-- `GET /api/properties/:matriculaId` - Consultar imóvel
-- `GET /api/properties/owner/:address` - Listar imóveis de um dono
-
-### Transferências
-- `POST /api/transfers/configure` - Configurar transferência
-- `POST /api/transfers/approve` - Aprovar transferência
-- `POST /api/transfers/accept` - Comprador aceitar
-- `POST /api/transfers/execute` - Executar transferência
-- `GET /api/transfers/status?from=X&to=Y` - Consultar status
-
-### Admin
-- `POST /api/admin/freeze-property` - Congelar/descongelar propriedade
-- `POST /api/admin/batch-freeze` - Congelar múltiplas propriedades
-- `POST /api/admin/pause-system` - Pausar sistema
-- `POST /api/admin/forced-transfer` - Transferência forçada
-- `GET /api/admin/property-frozen/:id` - Verificar se está congelada
-- `GET /api/admin/system-paused` - Verificar se sistema está pausado
-
-## 🧪 Testar com cURL
+### Execução
 
 ```bash
-# Registrar imóvel
-curl -X POST http://localhost:3000/api/properties/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "matriculaId": 123456,
-    "endereco": "Rua Exemplo, 123",
-    "proprietario": "0x565524f400856766f11562832eb809d889491a01"
-  }'
+# Desenvolvimento (hot reload)
+npm run dev
 
-# Consultar imóvel
-curl http://localhost:3000/api/properties/123456
+# Produção
+npm start
 
-# Health check
-curl http://localhost:3000/health
+# Event Listener (monitoramento de eventos)
+node event-listener.js
 ```
 
-## Event Listener
+## 📚 Documentação da API
 
-The event listener is a separate process that monitors blockchain events and sends webhooks:
+### Health Check
 
-### Monitored Events
+#### GET /health
 
-| Event | Contract | Description |
-|-------|----------|-------------|
-| `PROPERTY_ISSUED` | PropertyTitleTREX | New property token minted |
-| `PROPERTY_TRANSFERRED` | PropertyTitleTREX | Ownership transferred |
-| `PROPERTY_REGISTERED` | RegistryMDCompliance | Property metadata registered |
-| `TRANSFER_CONFIGURED` | ApprovalsModule | Transfer initiated with approvers |
-| `TRANSFER_APPROVED` | ApprovalsModule | Approver gave approval |
-| `BUYER_ACCEPTED` | ApprovalsModule | Buyer accepted transfer |
-| `APPROVER_REGISTERED` | ApproversRegistry | New approver entity registered |
+Verifica se o serviço está operacional.
 
-### Webhook Payload Example
-
+**Resposta:**
 ```json
 {
-  "eventType": "PROPERTY_TRANSFERRED",
-  "matricula": "123456",
-  "from": "0x1234...",
-  "to": "0x5678...",
-  "transactionHash": "0xabcd...",
-  "blockNumber": 12345,
-  "timestamp": "2025-01-17T10:30:00.000Z"
+  "status": "OK",
+  "timestamp": "2025-11-22T10:30:00.000Z",
+  "service": "Besu Property Ledger API"
 }
 ```
 
-## Health Check
+---
 
-```bash
-# API health
-curl http://localhost:3000/health
+## 🏠 Propriedades (`/api/properties`)
 
-# Check blockchain connection
-curl http://localhost:3000/api/health
-```
+### 1. Registrar Propriedade
 
-Expected response:
+#### POST /api/properties/register
+
+Cria uma solicitação de registro de propriedade que ficará pendente até receber as 3 aprovações.
+
+**Request Body:**
 ```json
 {
-  "status": "healthy",
-  "blockchain": "connected",
-  "contracts": "loaded"
+  "matriculaId": 999001,
+  "folha": 123,
+  "comarca": "São Paulo - SP",
+  "endereco": "Rua Teste, 123",
+  "metragem": 250,
+  "proprietario": "0x1234...abcd",
+  "matriculaOrigem": 999000,
+  "tipo": 0,
+  "isRegular": true
 }
 ```
 
-## Troubleshooting
+**Campos:**
+- `matriculaId` (number, obrigatório): ID único da matrícula
+- `folha` (number): Número da folha do cartório
+- `comarca` (string, obrigatório): Nome da comarca
+- `endereco` (string, obrigatório): Endereço do imóvel
+- `metragem` (number): Área em m²
+- `proprietario` (string, obrigatório): Endereço Ethereum do proprietário
+- `matriculaOrigem` (number): Matrícula de origem (se desmembramento)
+- `tipo` (number): 0=URBANO, 1=RURAL, 2=LITORAL
+- `isRegular` (boolean): Status de regularidade
 
-### Cannot Connect to Blockchain
-
-**Problem**: `Error connecting to RPC`
-
-**Solution**:
-- Verify Besu network is running: `docker ps | grep besu`
-- Check RPC URL in `.env` matches Besu configuration
-- Test connection: `curl http://localhost:8545 -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'`
-
-### Contract Addresses Not Found
-
-**Problem**: `Contract address is undefined`
-
-**Solution**:
-1. Deploy contracts in besu-property-ledger
-2. Copy addresses from `deployed-addresses.txt`
-3. Update `.env` with correct addresses
-4. Restart service
-
-### ABIs Not Found
-
-**Problem**: `Cannot find module './abis/PropertyTitleTREX.json'`
-
-**Solution**:
-```bash
-cd ../besu-property-ledger
-cat out/PropertyTitleTREX.sol/PropertyTitleTREX.json | jq '.abi' > ../offchain-consumer-srv/src/abis/PropertyTitleTREX.json
-cat out/ApprovalsModule.sol/ApprovalsModule.json | jq '.abi' > ../offchain-consumer-srv/src/abis/ApprovalsModule.json
-cat out/RegistryMDCompliance.sol/RegistryMDCompliance.json | jq '.abi' > ../offchain-consumer-srv/src/abis/RegistryMDCompliance.json
+**Resposta (201 Created):**
+```json
+{
+  "success": true,
+  "message": "Solicitação de registro criada com sucesso. Aguardando aprovações.",
+  "data": {
+    "requestHash": "0xabc123...",
+    "txHash": "0xdef456...",
+    "blockNumber": 1234,
+    "matriculaId": 999001,
+    "beneficiary": "0x1234...abcd",
+    "status": "PENDING_APPROVALS",
+    "nextSteps": [
+      "Aprovação Financial (Instituição Financeira)",
+      "Aprovação Registry Office (Cartório)",
+      "Aprovação Municipality (Prefeitura)",
+      "Execução automática após todas as aprovações"
+    ]
+  }
+}
 ```
 
-### Transaction Reverted
+### 2. Buscar Propriedade por ID
 
-**Problem**: `Transaction reverted without a reason`
+#### GET /api/properties/:matriculaId
 
-**Solution**:
-- Check wallet has ETH for gas (even though gas price is 0)
-- Verify wallet has required role for operation
-- Check contract is not paused
-- Verify transfer is properly configured before execution
+Retorna informações completas de uma propriedade (compliance + blockchain).
 
-### Webhook Failures
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "matriculaId": 999001,
+    "folha": 123,
+    "comarca": "São Paulo - SP",
+    "endereco": "Rua Teste, 123",
+    "metragem": 250,
+    "proprietario": "0x1234...abcd",
+    "matriculaOrigem": 999000,
+    "tipo": 0,
+    "isRegular": true,
+    "currentOwner": "0x1234...abcd",
+    "exists": true,
+    "typeName": "URBANO"
+  }
+}
+```
 
-**Problem**: Event listener shows webhook errors
+### 3. Buscar Dados do Compliance
 
-**Solution**:
-- Verify orchestrator is running and accessible
-- Check `WEBHOOK_URL` in `.env` is correct
-- Verify `WEBHOOK_API_KEY` if authentication is required
-- Check orchestrator logs for webhook endpoint errors
+#### GET /api/properties/compliance/:matriculaId
 
-## License
+Retorna apenas os dados armazenados no módulo de compliance (RegistryMDCompliance).
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "data": {
+    "matriculaId": 999001,
+    "folha": 123,
+    "comarca": "São Paulo - SP",
+    "endereco": "Rua Teste, 123",
+    "metragem": 250,
+    "proprietario": "0x1234...abcd",
+    "matriculaOrigem": 999000,
+    "tipo": 0,
+    "isRegular": true,
+    "typeName": "URBANO"
+  }
+}
+```
+
+### 4. Listar Propriedades de um Dono
+
+#### GET /api/properties/owner/:address
+
+Retorna todas as propriedades pertencentes a um endereço.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "owner": "0x1234...abcd",
+  "count": 2,
+  "matriculas": [999001, 999002],
+  "properties": [...]
+}
+```
+
+### 5. Contar Propriedades
+
+#### GET /api/properties/count/:address
+
+Retorna a quantidade de propriedades de um endereço.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "owner": "0x1234...abcd",
+  "propertyCount": 2
+}
+```
+
+### 6. Verificar Dono de Propriedade
+
+#### GET /api/properties/:matriculaId/owner
+
+Retorna o endereço do dono atual da propriedade.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "matriculaId": 999001,
+  "owner": "0x1234...abcd"
+}
+```
+
+### 7. Verificar Existência
+
+#### GET /api/properties/:matriculaId/exists
+
+Verifica se uma propriedade existe no blockchain.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "matriculaId": 999001,
+  "exists": true
+}
+```
+
+### 8. Atualizar Dados Cadastrais
+
+#### PUT /api/properties/:matriculaId
+
+Atualiza informações cadastrais de uma propriedade no compliance.
+
+**Request Body:**
+```json
+{
+  "endereco": "Novo Endereço, 456",
+  "metragem": 300,
+  "isRegular": true
+}
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Propriedade atualizada",
+  "matriculaId": 999001,
+  "txHash": "0xabc123..."
+}
+```
+
+---
+
+## ✅ Aprovações V2 (`/api/approvals`)
+
+### 1. Consultar Status de Registro
+
+#### GET /api/approvals/registration/:requestHash/status
+
+Verifica o status de uma solicitação de registro pendente.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "status": {
+    "exists": true,
+    "matricula": 999001,
+    "beneficiary": "0x1234...abcd",
+    "financialApproved": true,
+    "registryOfficeApproved": false,
+    "municipalityApproved": false,
+    "executed": false
+  }
+}
+```
+
+### 2. Aprovar como Instituição Financeira
+
+#### POST /api/approvals/registration/:requestHash/approve-financial
+
+Aprova uma solicitação de registro como Instituição Financeira.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Aprovação registrada como Instituição Financeira",
+  "txHash": "0xabc123...",
+  "note": "Aguardando aprovações restantes (Registry Office, Municipality)"
+}
+```
+
+### 3. Aprovar como Cartório
+
+#### POST /api/approvals/registration/:requestHash/approve-registry
+
+Aprova uma solicitação de registro como Cartório (Registry Office).
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Aprovação registrada como Cartório",
+  "txHash": "0xdef456...",
+  "note": "Aguardando aprovações restantes (Municipality)"
+}
+```
+
+### 4. Aprovar como Prefeitura (AUTO-EXECUTA)
+
+#### POST /api/approvals/registration/:requestHash/approve-municipality
+
+Aprova uma solicitação de registro como Prefeitura. **ATENÇÃO:** Esta é a 3ª e última aprovação, que **executa automaticamente** o registro.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "⚡ APROVAÇÃO FINAL! Registro EXECUTADO automaticamente",
+  "txHash": "0x789abc...",
+  "note": "O token foi emitido e a propriedade está registrada on-chain!"
+}
+```
+
+### 5. Solicitar Transferência
+
+#### POST /api/approvals/transfer/request
+
+Cria uma solicitação de transferência de propriedade.
+
+**Request Body:**
+```json
+{
+  "from": "0x1234...aaaa",
+  "to": "0x5678...bbbb",
+  "matriculaId": 999001
+}
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Transferência solicitada",
+  "requestHash": "0xbbb222...",
+  "txHash": "0xccc333...",
+  "blockNumber": 2345
+}
+```
+
+### 6. Aprovar Transferência (Instituição Financeira)
+
+#### POST /api/approvals/transfer/:requestHash/approve-financial
+
+Aprova uma transferência como Instituição Financeira.
+
+### 7. Aprovar Transferência (Cartório)
+
+#### POST /api/approvals/transfer/:requestHash/approve-registry
+
+Aprova uma transferência como Cartório.
+
+### 8. Aprovar Transferência (Prefeitura - AUTO-EXECUTA)
+
+#### POST /api/approvals/transfer/:requestHash/approve-municipality
+
+Aprova uma transferência como Prefeitura. **Esta é a aprovação final que executa automaticamente a transferência.**
+
+### 9. Consultar Status de Transferência
+
+#### GET /api/approvals/transfer/:requestHash/status
+
+Verifica o status de uma transferência pendente.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "status": {
+    "exists": true,
+    "matricula": 999001,
+    "from": "0x1234...aaaa",
+    "to": "0x5678...bbbb",
+    "financialApproved": true,
+    "registryOfficeApproved": true,
+    "municipalityApproved": false,
+    "executed": false
+  }
+}
+```
+
+---
+
+## 👤 Identidade (`/api/identity`)
+
+### 1. Registrar Identidade
+
+#### POST /api/identity/register
+
+Registra uma identidade no `IdentityRegistry`.
+
+**Request Body:**
+```json
+{
+  "walletAddress": "0x1234...abcd",
+  "country": 76
+}
+```
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Identidade registrada",
+  "walletAddress": "0x1234...abcd",
+  "country": 76,
+  "txHash": "0xabc123..."
+}
+```
+
+### 2. Verificar Identidade
+
+#### GET /api/identity/:walletAddress/verify
+
+Verifica se um endereço tem identidade registrada.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "walletAddress": "0x1234...abcd",
+  "isVerified": true
+}
+```
+
+---
+
+## 📊 Informações (`/api/info`)
+
+### 1. Listar Propriedades de Endereço
+
+#### GET /api/info/properties/:address
+
+Retorna matrículas das propriedades de um endereço.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "owner": "0x1234...abcd",
+  "properties": [999001, 999002]
+}
+```
+
+### 2. Contar Propriedades
+
+#### GET /api/info/count/:address
+
+Retorna contagem de propriedades.
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "owner": "0x1234...abcd",
+  "count": 2
+}
+```
+
+---
+
+## 🔧 Sistema (`/api/system`)
+
+Endpoints administrativos para gerenciamento do sistema (roles, pausas, etc.).
+
+---
+
+## 🎯 Fluxos Completos
+
+### Fluxo de Registro de Propriedade
+
+```
+1. POST /api/properties/register
+   ↓ (retorna requestHash)
+2. POST /api/approvals/registration/{requestHash}/approve-financial
+   ↓
+3. POST /api/approvals/registration/{requestHash}/approve-registry
+   ↓
+4. POST /api/approvals/registration/{requestHash}/approve-municipality
+   ↓ (EXECUTA AUTOMATICAMENTE)
+✅ Propriedade registrada e tokens mintados!
+```
+
+### Fluxo de Transferência de Propriedade
+
+```
+1. POST /api/approvals/transfer/request
+   ↓ (retorna requestHash)
+2. POST /api/approvals/transfer/{requestHash}/approve-financial
+   ↓
+3. POST /api/approvals/transfer/{requestHash}/approve-registry
+   ↓
+4. POST /api/approvals/transfer/{requestHash}/approve-municipality
+   ↓ (EXECUTA AUTOMATICAMENTE)
+✅ Propriedade transferida!
+```
+
+---
+
+## 🛠️ Utilitários
+
+### Extrair ABIs dos Contratos
+
+```bash
+# Extrai ABIs dos contratos Foundry para src/abis/
+./extract-abis.sh
+```
+
+### Testar Conexão com Blockchain
+
+```bash
+node test-connection.js
+```
+
+### Event Listener
+
+O serviço de event listener monitora eventos do blockchain e envia webhooks para o Orchestrator:
+
+```bash
+node event-listener.js
+```
+
+**Eventos monitorados:**
+- `PropertyRegistered`
+- `PropertyTransferred`
+- `Transfer` (ERC-20)
+- `ApprovalRecorded`
+
+---
+
+## ⚙️ Tecnologias
+
+- **Node.js 18+** - Runtime JavaScript
+- **TypeScript 5.x** - Tipagem estática
+- **Express.js 4.x** - Framework web
+- **Ethers.js 6.x** - Biblioteca blockchain
+- **Hyperledger Besu** - Cliente Ethereum enterprise
+
+---
+
+## 📝 Notas Importantes
+
+### Execução Automática
+
+⚡ **NÃO existem** endpoints `/execute` separados. A execução é **AUTOMÁTICA** quando a 3ª aprovação é recebida!
+
+**Métodos removidos:**
+- ❌ `executeRegistration()`
+- ❌ `executeTransfer()`
+
+### Métodos do Contrato
+
+Os seguintes métodos **NÃO existem** no `PropertyTitleTREX.sol`:
+
+❌ Removidos da API:
+- `freezeProperty()` / `unfreezeProperty()`
+- `batchFreezeProperties()`
+- `forcedTransferProperty()`
+- `isPropertyFrozen()`
+- `isTransferPaused()`
+- `mint()` / `burn()` manuais
+- Sistema de validators separado
+
+### Sistema V1 vs V2
+
+**V1 (Obsoleto - Removido):**
+- Contratos separados: `ApprovalsModule`, `ApproversRegistry`
+- Sistema de validators com endereços
+- Execução manual em 3 etapas
+
+**V2 (Atual):**
+- Aprovação integrada no `PropertyTitleTREX`
+- Sistema baseado em roles (FINANCIAL_ROLE, REGISTRY_OFFICE_ROLE, MUNICIPALITY_ROLE)
+- Execução automática em 2 etapas: request → approve (auto-executa)
+
+---
+
+## 📄 Licença
 
 MIT

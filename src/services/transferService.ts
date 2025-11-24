@@ -1,422 +1,247 @@
 import { ethers } from 'ethers';
-import {
-  getPropertyTitleWithSigner,
-  getApprovalsModuleWithSigner,
-  approvalsModuleContract,
-  ADDRESSES
-} from '../config/contracts';
-import { adminWallet, createWallet } from '../config/blockchain';
+const PropertyTitleABI = require('../abis/PropertyTitleTREX.json');
+import { identityService } from './identityService';
 
-export interface TransferConfig {
-  matriculaId: number;
-  requiredApprovers: string[];
-  approvalCount: number;
-  isConfigured: boolean;
-  buyerAccepted: boolean;
+// Provider customizado para Besu
+class LegacyProvider extends ethers.JsonRpcProvider {
+  async getFeeData(): Promise<ethers.FeeData> {
+    return new ethers.FeeData(
+      ethers.toBigInt(1000),
+      null,
+      null
+    );
+  }
+
+  async resolveName(name: string): Promise<null> {
+    return null;
+  }
 }
 
+/**
+ * TransferService - Gerencia transferências de propriedades
+ */
 export class TransferService {
-  
+  private provider: LegacyProvider;
+  private adminWallet: ethers.Wallet;
+  private propertyContract: ethers.Contract;
+
+  constructor() {
+    this.provider = new LegacyProvider(process.env.RPC_URL!, {
+      chainId: Number(process.env.CHAIN_ID) || 1337,
+      name: 'besu-private',
+    });
+
+    this.adminWallet = new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY!, this.provider);
+
+    this.propertyContract = new ethers.Contract(
+      process.env.PROPERTY_TITLE_ADDRESS!,
+      PropertyTitleABI.abi || PropertyTitleABI,
+      this.adminWallet
+    );
+  }
+
   /**
-   * PASSO 1: Configurar transferência com lista de aprovadores
-   * Executado com ORCHESTRATOR_ROLE
-   * 
-   * IMPORTANTE: Os aprovadores devem estar registrados no ApproversRegistry
+   * Solicita transferência de propriedade (fica pendente até aprovações)
    */
-  async configureTransfer(
-    from: string,
-    to: string,
-    matriculaId: number,
-    requiredApprovers: string[]
-  ): Promise<string> {
+  async requestPropertyTransfer(from: string, to: string, matriculaId: number): Promise<{
+    success: boolean;
+    requestHash: string;
+    txHash: string;
+    blockNumber: number;
+  }> {
     try {
-      console.log(`⚙️ Configurando transferência da matrícula ${matriculaId}...`);
+      console.log(`🔄 Solicitando transferência de propriedade ${matriculaId}...`);
       console.log(`   De: ${from}`);
       console.log(`   Para: ${to}`);
-      console.log(`   Aprovadores necessários: ${requiredApprovers.length}`);
-      
-      // Usar adminWallet pois tem saldo (orchestratorWallet não foi financiado)
-      const approvalsModule = getApprovalsModuleWithSigner(adminWallet);
-      
-      // Chamar configureTransfer no ApprovalsModule
-      const tx = await approvalsModule.configureTransfer(
+
+      // Garantir que o comprador tem identidade registrada
+      await identityService.ensureIdentityRegistered(to);
+
+      // VALIDAÇÕES PRÉ-TRANSAÇÃO
+      console.log(`🔍 Validando pré-condições...`);
+
+      // VALIDAÇÃO 1: Verificar se propriedade existe
+      const exists = await this.propertyContract.propertyExists(matriculaId);
+      console.log(`   ✓ Property exists: ${exists}`);
+      if (!exists) {
+        throw new Error(`Property ${matriculaId} does not exist. Register it first via /api/properties/approvals/request`);
+      }
+
+      // VALIDAÇÃO 2: Verificar dono atual
+      const actualOwner = await this.propertyContract.propertyOwner(matriculaId);
+      console.log(`   ✓ Current owner: ${actualOwner}`);
+      console.log(`   ✓ Expected owner (from): ${from}`);
+      if (actualOwner.toLowerCase() !== from.toLowerCase()) {
+        throw new Error(`Incorrect owner. Property ${matriculaId} is owned by ${actualOwner}, not ${from}`);
+      }
+
+      console.log(`✅ Todas validações passaram! Enviando transação...`);
+
+      const tx = await this.propertyContract.requestPropertyTransfer(
         from,
         to,
         matriculaId,
-        ADDRESSES.compliance,
-        requiredApprovers,
         {
           type: 0,
-          gasLimit: 400000,
+          gasLimit: 500000,
           gasPrice: 1000
         }
       );
-      
+
       console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
       const receipt = await tx.wait();
-      
-      console.log(`✅ Transferência configurada! Block: ${receipt.blockNumber}`);
-      
-      return tx.hash;
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao configurar transferência:', error);
-      throw new Error(`Falha ao configurar: ${error.message}`);
-    }
-  }
-  
-  /**
-   * PASSO 2: Aprovador registra sua aprovação
-   * Cada aprovador da lista deve chamar esta função
-   * 
-   * IMPORTANTE: Apenas aprovadores registrados e ativos podem aprovar
-   */
-  async approve(
-    from: string,
-    to: string,
-    matriculaId: number,
-    approverPrivateKey: string
-  ): Promise<{
-    txHash: string;
-    approver: string;
-    progress: { current: number; required: number };
-  }> {
-    try {
-      const approverWallet = createWallet(approverPrivateKey);
-      console.log(`👍 Aprovando transferência (aprovador: ${approverWallet.address})...`);
-      
-      const approvalsModule = getApprovalsModuleWithSigner(approverWallet);
-      
-      const tx = await approvalsModule.approve(
-        from,
-        to,
-        matriculaId,
-        ADDRESSES.compliance,
-        {
-          type: 0,
-          gasLimit: 300000,
-          gasPrice: 1000
-        }
-      );
-      
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      const receipt = await tx.wait();
-      
-      // Buscar evento Approved para ver o progresso
-      let progress = { current: 0, required: 0 };
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsed = approvalsModule.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          if (parsed?.name === 'Approved') {
-            progress.current = Number(parsed.args[2]);
-            progress.required = Number(parsed.args[3]);
-            return true;
+
+      // Extrair requestHash do evento TransferRequested
+      const event = receipt.logs
+        .map((log: any) => {
+          try {
+            return this.propertyContract.interface.parseLog(log);
+          } catch {
+            return null;
           }
-          return false;
-        } catch {
-          return false;
-        }
-      });
-      
-      console.log(`✅ Aprovação registrada! Progresso: ${progress.current}/${progress.required}`);
-      
+        })
+        .find((e: any) => e?.name === 'TransferRequested');
+
+      if (!event) {
+        throw new Error('TransferRequested event not found');
+      }
+
+      const requestHash = event.args.requestHash;
+
+      console.log(`✅ Solicitação de transferência criada!`);
+      console.log(`   Request Hash: ${requestHash}`);
+
       return {
+        success: true,
+        requestHash,
         txHash: tx.hash,
-        approver: approverWallet.address,
-        progress
+        blockNumber: receipt.blockNumber
       };
-      
+
     } catch (error: any) {
-      console.error('❌ Erro ao aprovar:', error);
-      throw new Error(`Falha ao aprovar: ${error.message}`);
+      console.error(`❌ Erro ao solicitar transferência:`, {
+        message: error.message,
+        reason: error.reason,
+        code: error.code,
+        data: error.data
+      });
+      throw new Error(`Falha ao solicitar transferência: ${error.reason || error.message}`);
     }
   }
-  
+
   /**
-   * ✅ CORREÇÃO: Aprovar usando admin wallet (mais seguro - não expõe private keys)
-   * O admin wallet assina a transação em nome do aprovador
+   * Aprova transferência como Instituição Financeira
    */
-  async approveWithAdminWallet(
-    from: string,
-    to: string,
-    matriculaId: number,
-    approverAddress: string  // Apenas para validação/log
-  ): Promise<{
+  async approveAsFinancial(requestHash: string): Promise<{
+    success: boolean;
     txHash: string;
-    approver: string;
-    progress: { current: number; required: number };
   }> {
     try {
-      console.log(`👍 Aprovando transferência via admin wallet...`);
-      console.log(`   Aprovador solicitante: ${approverAddress}`);
-      console.log(`   From: ${from}, To: ${to}, Matrícula: ${matriculaId}`);
-      
-      // Usar adminWallet que tem saldo e ORCHESTRATOR_ROLE
-      const approvalsModule = getApprovalsModuleWithSigner(adminWallet);
-      
-      const tx = await approvalsModule.approve(
-        from,
-        to,
-        matriculaId,
-        ADDRESSES.compliance,
+      console.log(`💰 Aprovando transferência como Instituição Financeira...`);
+
+      const tx = await this.propertyContract.approveTransferAsFinancial(
+        requestHash,
         {
           type: 0,
-          gasLimit: 300000,
+          gasLimit: 200000,
           gasPrice: 1000
         }
       );
-      
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      const receipt = await tx.wait();
-      
-      // Buscar evento Approved para ver o progresso
-      let progress = { current: 0, required: 0 };
-      receipt.logs.find((log: any) => {
-        try {
-          const parsed = approvalsModule.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          if (parsed?.name === 'Approved') {
-            progress.current = Number(parsed.args[2]);
-            progress.required = Number(parsed.args[3]);
-            return true;
-          }
-          return false;
-        } catch {
-          return false;
-        }
-      });
-      
-      console.log(`✅ Aprovação registrada! Progresso: ${progress.current}/${progress.required}`);
-      
-      return {
-        txHash: tx.hash,
-        approver: adminWallet.address, // Quem realmente assinou
-        progress
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao aprovar:', error);
-      throw new Error(`Falha ao aprovar: ${error.message}`);
-    }
-  }
-  
-  /**
-   * PASSO 3: Comprador aceita a transferência
-   * O comprador (to) deve chamar esta função
-   */
-  async acceptTransfer(
-    from: string,
-    matriculaId: number,
-    buyerPrivateKey: string
-  ): Promise<{
-    txHash: string;
-    buyer: string;
-  }> {
-    try {
-      const buyerWallet = createWallet(buyerPrivateKey);
-      console.log(`🤝 Comprador ${buyerWallet.address} aceitando transferência...`);
-      
-      const approvalsModule = getApprovalsModuleWithSigner(buyerWallet);
-      
-      const tx = await approvalsModule.acceptTransfer(
-        from,
-        matriculaId,
-        ADDRESSES.compliance,
-        {
-          type: 0,
-          gasLimit: 250000,
-          gasPrice: 1000
-        }
-      );
-      
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+
       await tx.wait();
-      
-      console.log(`✅ Comprador aceitou a transferência!`);
-      
-      return {
-        txHash: tx.hash,
-        buyer: buyerWallet.address
-      };
-      
+      console.log(`✅ Transferência aprovada pela Instituição Financeira!`);
+
+      return { success: true, txHash: tx.hash };
+
     } catch (error: any) {
-      console.error('❌ Erro ao aceitar:', error);
-      throw new Error(`Falha ao aceitar: ${error.message}`);
+      throw new Error(`Falha na aprovação financeira: ${error.message}`);
     }
   }
-  
+
   /**
-   * PASSO 4: Executar a transferência
-   * O vendedor (from) chama esta função após todas as aprovações e aceitação
-   * 
-   * IMPORTANTE: Só funciona se:
-   * - Todas as aprovações foram registradas
-   * - Comprador aceitou
-   * - Propriedade está regular no compliance
+   * Aprova transferência como Cartório
    */
-  async executeTransfer(
-    to: string,
-    matriculaId: number,
-    sellerPrivateKey: string
-  ): Promise<{
+  async approveAsRegistryOffice(requestHash: string): Promise<{
+    success: boolean;
     txHash: string;
+  }> {
+    try {
+      console.log(`📋 Aprovando transferência como Cartório...`);
+
+      const tx = await this.propertyContract.approveTransferAsRegistryOffice(requestHash, {
+        type: 0,
+        gasLimit: 200000,
+        gasPrice: 1000
+      });
+
+      await tx.wait();
+      console.log(`✅ Transferência aprovada pelo Cartório!`);
+
+      return { success: true, txHash: tx.hash };
+
+    } catch (error: any) {
+      throw new Error(`Falha na aprovação do cartório: ${error.message}`);
+    }
+  }
+
+  /**
+   * Aprova transferência como Prefeitura (auto-executa quando última aprovação)
+   */
+  async approveAsMunicipality(requestHash: string): Promise<{
+    success: boolean;
+    txHash: string;
+  }> {
+    try {
+      console.log(`🏛️ Aprovando transferência como Prefeitura...`);
+
+      const tx = await this.propertyContract.approveTransferAsMunicipality(requestHash, {
+        type: 0,
+        gasLimit: 200000,
+        gasPrice: 1000
+      });
+
+      await tx.wait();
+      console.log(`✅ Transferência aprovada pela Prefeitura (auto-executada)!`);
+
+      return { success: true, txHash: tx.hash };
+
+    } catch (error: any) {
+      throw new Error(`Falha na aprovação da prefeitura: ${error.message}`);
+    }
+  }
+
+  /**
+   * Consulta status de uma transferência pendente
+   * NOTA: A execução é AUTOMÁTICA quando todas as 3 aprovações são recebidas
+   */
+  async getTransferStatus(requestHash: string): Promise<{
+    exists: boolean;
+    matricula: number;
     from: string;
     to: string;
-    matriculaId: number;
+    financialApproved: boolean;
+    registryOfficeApproved: boolean;
+    municipalityApproved: boolean;
+    executed: boolean;
   }> {
     try {
-      const sellerWallet = createWallet(sellerPrivateKey);
-      console.log(`🚀 Executando transferência da matrícula ${matriculaId}...`);
-      console.log(`   De: ${sellerWallet.address}`);
-      console.log(`   Para: ${to}`);
-      
-      const propertyTitle = getPropertyTitleWithSigner(sellerWallet);
-      
-      const tx = await propertyTitle.transferProperty(
-        sellerWallet.address,  // from
-        to,                     // to
-        matriculaId,            // matricula
-        {
-          type: 0,
-          gasLimit: 600000,
-          gasPrice: 1000
-        }
-      );
-      
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      const receipt = await tx.wait();
-      
-      console.log(`✅ Transferência executada! Block: ${receipt.blockNumber}`);
-      
-      // Buscar evento PropertyTransferred
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsed = propertyTitle.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          return parsed?.name === 'PropertyTransferred';
-        } catch {
-          return false;
-        }
-      });
-      
-      if (event) {
-        console.log(`📋 Matrícula ${matriculaId} transferida com sucesso!`);
-      }
-      
+      const transfer = await this.propertyContract.pendingTransfers(requestHash);
+
       return {
-        txHash: tx.hash,
-        from: sellerWallet.address,
-        to,
-        matriculaId
+        exists: transfer.exists,
+        matricula: Number(transfer.matricula),
+        from: transfer.from,
+        to: transfer.to,
+        financialApproved: transfer.financialApproved,
+        registryOfficeApproved: transfer.registryOfficeApproved,
+        municipalityApproved: transfer.municipalityApproved,
+        executed: transfer.executed
       };
-      
+
     } catch (error: any) {
-      console.error('❌ Erro ao executar transferência:', error);
-      throw new Error(`Falha na transferência: ${error.message}`);
-    }
-  }
-  
-  /**
-   * Consultar status de uma transferência configurada
-   */
-  async getTransferStatus(
-    from: string,
-    to: string,
-    matriculaId: number
-  ): Promise<TransferConfig> {
-    try {
-      const config = await approvalsModuleContract.getTransferConfig(
-        from,
-        to,
-        matriculaId,
-        ADDRESSES.compliance
-      );
-      
-      return {
-        matriculaId: Number(config[0]),
-        requiredApprovers: config[1],
-        approvalCount: Number(config[2]),
-        isConfigured: config[3],
-        buyerAccepted: config[4]
-      };
-      
-    } catch (error: any) {
-      throw new Error(`Erro ao consultar status: ${error.message}`);
-    }
-  }
-  
-  /**
-   * Verificar se um aprovador específico já aprovou
-   */
-  async hasApproved(
-    from: string,
-    to: string,
-    matriculaId: number,
-    approverAddress: string
-  ): Promise<boolean> {
-    try {
-      return await approvalsModuleContract.hasApproved(
-        from,
-        to,
-        matriculaId,
-        ADDRESSES.compliance,
-        approverAddress
-      );
-      
-    } catch (error: any) {
-      throw new Error(`Erro ao verificar aprovação: ${error.message}`);
-    }
-  }
-  
-  /**
-   * Obter informações detalhadas de uma transferência
-   * Inclui quem já aprovou e quem falta
-   */
-  async getTransferDetails(
-    from: string,
-    to: string,
-    matriculaId: number
-  ): Promise<{
-    config: TransferConfig;
-    approvalStatus: {
-      approver: string;
-      hasApproved: boolean;
-    }[];
-    readyToExecute: boolean;
-  }> {
-    try {
-      const config = await this.getTransferStatus(from, to, matriculaId);
-      
-      // Verificar status de cada aprovador
-      const approvalStatus = await Promise.all(
-        config.requiredApprovers.map(async (approver) => ({
-          approver,
-          hasApproved: await this.hasApproved(from, to, matriculaId, approver)
-        }))
-      );
-      
-      // Verificar se está pronta para executar
-      const readyToExecute = 
-        config.isConfigured &&
-        config.approvalCount === config.requiredApprovers.length &&
-        config.buyerAccepted;
-      
-      return {
-        config,
-        approvalStatus,
-        readyToExecute
-      };
-      
-    } catch (error: any) {
-      throw new Error(`Erro ao buscar detalhes: ${error.message}`);
+      throw new Error(`Falha ao consultar status: ${error.message}`);
     }
   }
 }
 
+export const transferService = new TransferService();

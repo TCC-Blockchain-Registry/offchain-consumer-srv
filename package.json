@@ -8,6 +8,7 @@
     "listen": "node event-listener.js",
     "listen:dev": "nodemon event-listener.js",
     "extract-abis": "node extract-abis.js",
+    "grant-roles": "node scripts/grant-institutional-roles.js",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"

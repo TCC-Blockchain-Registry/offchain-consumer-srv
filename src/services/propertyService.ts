@@ -1,13 +1,28 @@
 import { ethers } from 'ethers';
+const PropertyTitleABI = require('../abis/PropertyTitleTREX.json');
 import {
-  getPropertyTitleWithSigner,
   getRegistryModuleWithSigner,
-  propertyTitleContract,
-  ADDRESSES
+  propertyTitleContract
 } from '../config/contracts';
 import { adminWallet } from '../config/blockchain';
+import { identityService } from './identityService';
 
-// Tipos baseados no smart contract RegistryMDCompliance
+// Provider customizado para Besu
+class LegacyProvider extends ethers.JsonRpcProvider {
+  async getFeeData(): Promise<ethers.FeeData> {
+    return new ethers.FeeData(
+      ethers.toBigInt(1000),
+      null,
+      null
+    );
+  }
+
+  async resolveName(name: string): Promise<null> {
+    return null;
+  }
+}
+
+// Tipos baseados no smart contract
 export enum PropertyType {
   URBANO = 0,
   RURAL = 1,
@@ -26,197 +41,232 @@ export interface PropertyInfo {
   isRegular: boolean;
 }
 
+/**
+ * PropertyService - Gerencia registro e consulta de propriedades
+ */
 export class PropertyService {
-  
-  /**
-   * PASSO 1: Registrar propriedade no módulo de compliance (RegistryMDCompliance)
-   * Executado com REGISTRAR_ROLE (cartório)
-   */
-  async registerPropertyInCompliance(propertyInfo: PropertyInfo): Promise<string> {
-    try {
-      console.log(`📝 Registrando propriedade ${propertyInfo.matriculaId} no módulo de compliance...`);
-      
-      // Usar adminWallet pois tem saldo (registrarWallet não foi financiado)
-      const registryModule = getRegistryModuleWithSigner(adminWallet);
-      
-      // Chamar função registerProperty com struct PropertyInfo
-      const tx = await registryModule.registerProperty(
-        {
-          matriculaId: propertyInfo.matriculaId,
-          folha: propertyInfo.folha,
-          comarca: propertyInfo.comarca,
-          endereco: propertyInfo.endereco,
-          metragem: propertyInfo.metragem,
-          proprietario: propertyInfo.proprietario,
-          matriculaOrigem: propertyInfo.matriculaOrigem,
-          tipo: propertyInfo.tipo,
-          isRegular: propertyInfo.isRegular
-        },
-        {
-          type: 0,
-          gasLimit: 300000,
-          gasPrice: 1000
-        }
-      );
-      
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      const receipt = await tx.wait();
-      
-      console.log(`✅ Propriedade registrada no compliance! Block: ${receipt.blockNumber}`);
-      return tx.hash;
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao registrar no compliance:', error);
-      throw new Error(`Falha ao registrar no compliance: ${error.message}`);
-    }
+  private provider: LegacyProvider;
+  private adminWallet: ethers.Wallet;
+  private propertyContract: ethers.Contract;
+
+  constructor() {
+    this.provider = new LegacyProvider(process.env.RPC_URL!, {
+      chainId: Number(process.env.CHAIN_ID) || 1337,
+      name: 'besu-private',
+    });
+
+    this.adminWallet = new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY!, this.provider);
+
+    this.propertyContract = new ethers.Contract(
+      process.env.PROPERTY_TITLE_ADDRESS!,
+      PropertyTitleABI.abi || PropertyTitleABI,
+      this.adminWallet
+    );
   }
-  
+
   /**
-   * PASSO 2: Emitir título de propriedade (mint token no PropertyTitleTREX)
-   * Executado com AGENT_ROLE (admin)
+   * Solicita registro de propriedade (fica pendente até aprovações)
    */
-  async issuePropertyTitle(ownerAddress: string, matriculaId: number): Promise<string> {
+  async requestPropertyRegistration(matriculaId: number, beneficiary: string): Promise<{
+    success: boolean;
+    requestHash: string;
+    txHash: string;
+    blockNumber: number;
+  }> {
     try {
-      console.log(`🏠 Emitindo título de propriedade para matrícula ${matriculaId}...`);
-      
-      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
-      
-      const tx = await propertyTitle.issueProperty(
-        ownerAddress,
+      console.log(`🏠 Solicitando registro de propriedade ${matriculaId}...`);
+      console.log(`   Beneficiário: ${beneficiary}`);
+
+      // Garantir que o beneficiário tem identidade registrada
+      await identityService.ensureIdentityRegistered(beneficiary);
+
+      const tx = await this.propertyContract.requestPropertyRegistration(
         matriculaId,
+        beneficiary,
         {
           type: 0,
-          gasLimit: 250000,
+          gasLimit: 500000,
           gasPrice: 1000
         }
       );
-      
+
       console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
       const receipt = await tx.wait();
-      
-      console.log(`✅ Título emitido! Block: ${receipt.blockNumber}`);
-      
-      // Buscar evento PropertyIssued
-      const event = receipt.logs.find((log: any) => {
-        try {
-          const parsed = propertyTitle.interface.parseLog({
-            topics: log.topics,
-            data: log.data
-          });
-          return parsed?.name === 'PropertyIssued';
-        } catch {
-          return false;
-        }
-      });
-      
-      if (event) {
-        console.log(`📋 Matrícula: ${matriculaId}, Proprietário: ${ownerAddress}`);
-      }
-      
-      return tx.hash;
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao emitir título:', error);
-      throw new Error(`Falha ao emitir título: ${error.message}`);
-    }
-  }
-  
-  /**
-   * Helper: Registrar identidade do proprietário no IdentityRegistry (se necessário)
-   * O proprietário precisa ter identidade registrada para receber tokens
-   */
-  private async ensureOwnerIdentity(ownerAddress: string): Promise<void> {
-    try {
-      const { ethers } = await import('ethers');
-      const IdentityRegistryABI = (await import('../abis/IdentityRegistry.json')).default;
-      const identityRegistry = new ethers.Contract(
-        ADDRESSES.identityRegistry,
-        IdentityRegistryABI,
-        adminWallet
-      );
-      
-      // Verificar se já está registrado
-      const isRegistered = await identityRegistry.isVerified(ownerAddress);
-      
-      if (!isRegistered) {
-        console.log(`📝 Registrando identidade do proprietário ${ownerAddress}...`);
-        
-        // Registrar com identidade zero (simplificado para desenvolvimento)
-        const tx = await identityRegistry.registerIdentity(
-          ownerAddress,
-          ethers.ZeroAddress, // Identity contract
-          76, // Country code: Brasil
-          {
-            type: 0,
-            gasLimit: 300000,
-            gasPrice: 1000
+
+      // Extrair requestHash do evento RegistrationRequested
+      const event = receipt.logs
+        .map((log: any) => {
+          try {
+            return this.propertyContract.interface.parseLog(log);
+          } catch {
+            return null;
           }
-        );
-        
-        await tx.wait();
-        console.log(`✅ Identidade registrada!`);
-      } else {
-        console.log(`✅ Proprietário já tem identidade registrada`);
+        })
+        .find((e: any) => e?.name === 'RegistrationRequested');
+
+      if (!event) {
+        throw new Error('RegistrationRequested event not found');
       }
+
+      const requestHash = event.args.requestHash;
+
+      console.log(`✅ Solicitação criada!`);
+      console.log(`   Request Hash: ${requestHash}`);
+      console.log(`   Block: ${receipt.blockNumber}`);
+
+      return {
+        success: true,
+        requestHash,
+        txHash: tx.hash,
+        blockNumber: receipt.blockNumber
+      };
+
     } catch (error: any) {
-      console.warn(`⚠️ Aviso ao registrar identidade: ${error.message}`);
-      // Não falhar completamente - pode já estar registrado
+      console.error(`❌ Erro ao solicitar registro:`, error.message);
+      throw new Error(`Falha ao solicitar registro: ${error.message}`);
     }
   }
 
   /**
-   * FLUXO COMPLETO: Registrar no compliance + Emitir título
-   * Este é o endpoint principal para registrar um imóvel
-   * 
-   * NOTA: Agora usa Sistema V2 (aprovações MANUAIS) - retorna requestHash para aprovações
+   * Aprova registro como Instituição Financeira
    */
-  async registerProperty(propertyInfo: PropertyInfo): Promise<{
-    requestHash: string;
+  async approveAsFinancial(requestHash: string): Promise<{
+    success: boolean;
     txHash: string;
-    blockNumber: number;
-    matriculaId: number;
-    beneficiary: string;
-    status: string;
   }> {
-    console.log(`🚀 Iniciando registro de solicitação do imóvel ${propertyInfo.matriculaId}...`);
-    console.log(`   📋 Usando Sistema V2 - Aprovações Manuais`);
-    
     try {
-      // Passo 0: Garantir que proprietário tem identidade registrada
-      await this.ensureOwnerIdentity(propertyInfo.proprietario);
-      
-      // Importar PropertyServiceV2
-      const { PropertyServiceV2 } = await import('./propertyServiceV2');
-      const propertyServiceV2 = new PropertyServiceV2();
-      
-      // Passo 1: Criar solicitação de registro (V2)
-      console.log(`📝 Criando solicitação de registro...`);
-      const requestResult = await propertyServiceV2.requestPropertyRegistration(
-        propertyInfo.matriculaId,
-        propertyInfo.proprietario
+      console.log(`💰 Aprovando registro como Instituição Financeira...`);
+      console.log(`   Request Hash: ${requestHash}`);
+
+      const tx = await this.propertyContract.approveRegistrationAsFinancial(
+        requestHash,
+        {
+          type: 0,
+          gasLimit: 200000,
+          gasPrice: 1000
+        }
       );
-      
-      console.log(`✅ Request criado com sucesso!`);
-      console.log(`   - Request Hash: ${requestResult.requestHash}`);
-      console.log(`   - TX Hash: ${requestResult.txHash}`);
-      console.log(`   - Block: ${requestResult.blockNumber}`);
-      console.log(`   ⏳ Aguardando aprovações: Financial, Registry Office, Municipality`);
-      
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Aprovado pela Instituição Financeira!`);
+
       return {
-        requestHash: requestResult.requestHash,
-        txHash: requestResult.txHash,
-        blockNumber: requestResult.blockNumber,
-        matriculaId: propertyInfo.matriculaId,
-        beneficiary: propertyInfo.proprietario,
-        status: 'PENDING_APPROVALS'
+        success: true,
+        txHash: tx.hash
       };
-      
+
     } catch (error: any) {
-      console.error('❌ Erro ao criar solicitação:', error);
-      throw error;
+      console.error(`❌ Erro ao aprovar (financial):`, error.message);
+      throw new Error(`Falha na aprovação financeira: ${error.message}`);
     }
   }
-  
+
+  /**
+   * Aprova registro como Cartório
+   */
+  async approveAsRegistryOffice(requestHash: string): Promise<{
+    success: boolean;
+    txHash: string;
+  }> {
+    try {
+      console.log(`📋 Aprovando registro como Cartório...`);
+      console.log(`   Request Hash: ${requestHash}`);
+
+      const tx = await this.propertyContract.approveRegistrationAsRegistryOffice(
+        requestHash,
+        {
+          type: 0,
+          gasLimit: 200000,
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Aprovado pelo Cartório!`);
+
+      return {
+        success: true,
+        txHash: tx.hash
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Erro ao aprovar (registry):`, error.message);
+      throw new Error(`Falha na aprovação do cartório: ${error.message}`);
+    }
+  }
+
+  /**
+   * Aprova registro como Prefeitura (auto-executa quando última aprovação)
+   */
+  async approveAsMunicipality(requestHash: string): Promise<{
+    success: boolean;
+    txHash: string;
+  }> {
+    try {
+      console.log(`🏛️ Aprovando registro como Prefeitura...`);
+      console.log(`   Request Hash: ${requestHash}`);
+
+      const tx = await this.propertyContract.approveRegistrationAsMunicipality(
+        requestHash,
+        {
+          type: 0,
+          gasLimit: 200000,
+          gasPrice: 1000
+        }
+      );
+
+      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
+      await tx.wait();
+
+      console.log(`✅ Aprovado pela Prefeitura (auto-executado)!`);
+
+      return {
+        success: true,
+        txHash: tx.hash
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Erro ao aprovar (municipality):`, error.message);
+      throw new Error(`Falha na aprovação da prefeitura: ${error.message}`);
+    }
+  }
+
+  /**
+   * Consulta status de um registro pendente
+   * NOTA: A execução é AUTOMÁTICA quando todas as 3 aprovações são recebidas
+   */
+  async getRegistrationStatus(requestHash: string): Promise<{
+    exists: boolean;
+    matricula: number;
+    beneficiary: string;
+    financialApproved: boolean;
+    registryOfficeApproved: boolean;
+    municipalityApproved: boolean;
+    executed: boolean;
+  }> {
+    try {
+      const registration = await this.propertyContract.pendingRegistrations(requestHash);
+
+      return {
+        exists: registration.exists,
+        matricula: Number(registration.matricula),
+        beneficiary: registration.beneficiary,
+        financialApproved: registration.financialApproved,
+        registryOfficeApproved: registration.registryOfficeApproved,
+        municipalityApproved: registration.municipalityApproved,
+        executed: registration.executed
+      };
+
+    } catch (error: any) {
+      console.error(`❌ Erro ao consultar status:`, error.message);
+      throw new Error(`Falha ao consultar status: ${error.message}`);
+    }
+  }
+
   /**
    * Consultar propriedade no módulo de compliance
    */
@@ -224,7 +274,7 @@ export class PropertyService {
     try {
       const registryModule = getRegistryModuleWithSigner(adminWallet);
       const property = await registryModule.getProperty(matriculaId);
-      
+
       return {
         matriculaId: Number(property.matriculaId),
         folha: Number(property.folha),
@@ -240,7 +290,7 @@ export class PropertyService {
       throw new Error(`Propriedade não encontrada: ${error.message}`);
     }
   }
-  
+
   /**
    * Listar todas as propriedades de um dono (do token)
    */
@@ -252,18 +302,18 @@ export class PropertyService {
       throw new Error(`Erro ao buscar propriedades: ${error.message}`);
     }
   }
-  
+
   /**
    * Verificar quem é o dono atual de uma propriedade
    */
   async getPropertyOwner(matriculaId: number): Promise<string> {
     try {
-      return await propertyTitleContract.getPropertyOwner(matriculaId);
+      return await propertyTitleContract.propertyOwner(matriculaId);
     } catch (error: any) {
       throw new Error(`Erro ao buscar dono: ${error.message}`);
     }
   }
-  
+
   /**
    * Verificar se propriedade existe
    */
@@ -274,47 +324,45 @@ export class PropertyService {
       throw new Error(`Erro ao verificar existência: ${error.message}`);
     }
   }
-  
-  /**
-   * Verificar se propriedade está congelada
-   */
-  async isPropertyFrozen(matriculaId: number): Promise<boolean> {
-    try {
-      return await propertyTitleContract.isPropertyFrozen(matriculaId);
-    } catch (error: any) {
-      throw new Error(`Erro ao verificar freeze: ${error.message}`);
-    }
-  }
-  
+
   /**
    * Obter informações completas de uma propriedade
-   * (combina dados do compliance + token)
    */
   async getPropertyDetails(matriculaId: number): Promise<{
-    complianceInfo: PropertyInfo;
+    complianceInfo: PropertyInfo | null;
     owner: string;
     exists: boolean;
-    frozen: boolean;
   }> {
     try {
-      const [complianceInfo, owner, exists, frozen] = await Promise.all([
-        this.getPropertyFromCompliance(matriculaId),
-        this.getPropertyOwner(matriculaId),
-        this.propertyExists(matriculaId),
-        this.isPropertyFrozen(matriculaId)
-      ]);
-      
+      // Primeiro verificar se a propriedade existe no token
+      const exists = await this.propertyExists(matriculaId);
+
+      if (!exists) {
+        throw new Error(`Propriedade ${matriculaId} não está registrada no token`);
+      }
+
+      // Buscar owner (sempre existe se a propriedade existe)
+      const owner = await this.getPropertyOwner(matriculaId);
+
+      // Tentar buscar dados de compliance (pode não existir)
+      let complianceInfo: PropertyInfo | null = null;
+      try {
+        complianceInfo = await this.getPropertyFromCompliance(matriculaId);
+      } catch (error: any) {
+        console.warn(`⚠️  Propriedade ${matriculaId} não tem dados de compliance: ${error.message}`);
+        // Não falha - apenas retorna null para complianceInfo
+      }
+
       return {
         complianceInfo,
         owner,
-        exists,
-        frozen
+        exists
       };
     } catch (error: any) {
       throw new Error(`Erro ao buscar detalhes: ${error.message}`);
     }
   }
-  
+
   /**
    * Atualizar informações cadastrais de uma propriedade
    */
@@ -354,125 +402,16 @@ export class PropertyService {
   }
 
   /**
-   * Congelar ou descongelar uma propriedade
-   * Requer AGENT_ROLE
-   */
-  async freezeProperty(matriculaId: number, freeze: boolean): Promise<string> {
-    try {
-      console.log(`${freeze ? '❄️ Congelando' : '🔥 Descongelando'} propriedade ${matriculaId}...`);
-
-      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
-
-      const tx = await propertyTitle.freezeProperty(
-        matriculaId,
-        freeze,
-        {
-          type: 0,
-          gasLimit: 150000,
-          gasPrice: 1000
-        }
-      );
-
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      await tx.wait();
-
-      console.log(`✅ Propriedade ${freeze ? 'congelada' : 'descongelada'}!`);
-      return tx.hash;
-
-    } catch (error: any) {
-      console.error(`❌ Erro ao ${freeze ? 'congelar' : 'descongelar'}:`, error);
-      throw new Error(`Falha ao ${freeze ? 'congelar' : 'descongelar'}: ${error.message}`);
-    }
-  }
-
-  /**
-   * Congelar ou descongelar múltiplas propriedades em lote
-   * Requer AGENT_ROLE
-   */
-  async batchFreezeProperties(matriculas: number[], freeze: boolean): Promise<string> {
-    try {
-      console.log(`${freeze ? '❄️ Congelando' : '🔥 Descongelando'} ${matriculas.length} propriedades em lote...`);
-      console.log(`   Matrículas: ${matriculas.join(', ')}`);
-
-      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
-
-      const tx = await propertyTitle.batchFreezeProperties(
-        matriculas,
-        freeze,
-        {
-          type: 0,
-          gasLimit: 300000 + (matriculas.length * 50000),
-          gasPrice: 1000
-        }
-      );
-
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      await tx.wait();
-
-      console.log(`✅ ${matriculas.length} propriedades ${freeze ? 'congeladas' : 'descongeladas'}!`);
-      return tx.hash;
-
-    } catch (error: any) {
-      console.error('❌ Erro no batch freeze:', error);
-      throw new Error(`Falha no batch freeze: ${error.message}`);
-    }
-  }
-
-  /**
-   * Transferir propriedade forçadamente (recuperação/emergência)
-   * Requer AGENT_ROLE
-   */
-  async forcedTransferProperty(from: string, to: string, matricula: number): Promise<string> {
-    try {
-      console.log(`⚠️ Transferência forçada da matrícula ${matricula}...`);
-      console.log(`   De: ${from} → Para: ${to}`);
-
-      const propertyTitle = getPropertyTitleWithSigner(adminWallet);
-
-      const tx = await propertyTitle.forcedTransferProperty(
-        from,
-        to,
-        matricula,
-        {
-          type: 0,
-          gasLimit: 300000,
-          gasPrice: 1000
-        }
-      );
-
-      console.log(`⏳ Aguardando confirmação... TX: ${tx.hash}`);
-      await tx.wait();
-
-      console.log(`✅ Transferência forçada executada!`);
-      return tx.hash;
-
-    } catch (error: any) {
-      console.error('❌ Erro na transferência forçada:', error);
-      throw new Error(`Falha na transferência forçada: ${error.message}`);
-    }
-  }
-
-  /**
    * Contar quantas propriedades um endereço possui
    */
   async propertyCountOf(ownerAddress: string): Promise<number> {
     try {
-      const count = await propertyTitleContract.propertyCountOf(ownerAddress);
+      const count = await propertyTitleContract.balanceOfProperties(ownerAddress);
       return Number(count);
     } catch (error: any) {
       throw new Error(`Erro ao contar propriedades: ${error.message}`);
     }
   }
-
-  /**
-   * Verificar se o sistema está pausado
-   */
-  async isTransferPaused(): Promise<boolean> {
-    try {
-      return await propertyTitleContract.isTransferPaused();
-    } catch (error: any) {
-      throw new Error(`Erro ao verificar pausa: ${error.message}`);
-    }
-  }
 }
 
+export const propertyService = new PropertyService();

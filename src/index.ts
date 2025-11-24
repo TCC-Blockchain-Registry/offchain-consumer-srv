@@ -1,18 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { spawn } from 'child_process';
+import path from 'path';
 import { checkConnection, checkBalances } from './config/blockchain';
 
-import approversRoutes from './routes/approvers.routes';
 import propertyRoutes from './routes/property.routes';
 import transferRoutes from './routes/transfer.routes';
-import approvalRoutes from './routes/approval.routes';
-import approvalsV2Routes from './routes/approvals.routes';
-import systemRoutes from './routes/system.routes';
-import tokenRoutes from './routes/token.routes';
-import infoRoutes from './routes/info.routes';
-import identityRoutes from './routes/identity.routes';
-import setupRoutes from './routes/setup.routes';
+import adminRoutes from './routes/admin.routes';
 
 dotenv.config();
 
@@ -27,16 +22,9 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api/approvers', approversRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/transfers', transferRoutes);
-app.use('/api/approvals', approvalRoutes);
-app.use('/api/approvals/v2', approvalsV2Routes);
-app.use('/api/system', systemRoutes);
-app.use('/api/tokens', tokenRoutes);
-app.use('/api/info', infoRoutes);
-app.use('/api/identity', identityRoutes);
-app.use('/api/setup', setupRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.get('/health', (req, res) => {
   res.json({
@@ -49,70 +37,70 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Besu Property Ledger API',
-    version: '1.0.0',
+    version: '2.0.0',
     description: 'API REST para tokenização de imóveis com ERC-3643',
+    architecture: 'Simplified - 2 main routes (properties + transfers) with integrated approvals',
     endpoints: {
       health: 'GET /health',
-      approvers: {
-        register: 'POST /api/approvers/register',
-        list: 'GET /api/approvers',
-        info: 'GET /api/approvers/:wallet',
-        validate: 'GET /api/approvers/validate/:wallet',
-        recommended: 'GET /api/approvers/recommended/list',
-        validateList: 'POST /api/approvers/validate-list',
-        deactivate: 'POST /api/approvers/:wallet/deactivate',
-        reactivate: 'POST /api/approvers/:wallet/reactivate'
-      },
       properties: {
+        description: 'Property registration and queries',
         register: 'POST /api/properties/register',
         get: 'GET /api/properties/:matriculaId',
         getCompliance: 'GET /api/properties/compliance/:matriculaId',
         byOwner: 'GET /api/properties/owner/:address',
+        countByOwner: 'GET /api/properties/count/:address',
         getOwner: 'GET /api/properties/:matriculaId/owner',
         exists: 'GET /api/properties/:matriculaId/exists',
-        frozen: 'GET /api/properties/:matriculaId/frozen',
-        update: 'PUT /api/properties/:matriculaId'
+        update: 'PUT /api/properties/:matriculaId',
+        approvals: {
+          description: 'Property registration approval workflow',
+          request: 'POST /api/properties/approvals/request',
+          approveFinancial: 'POST /api/properties/approvals/:requestHash/financial',
+          approveRegistry: 'POST /api/properties/approvals/:requestHash/registry-office',
+          approveMunicipality: 'POST /api/properties/approvals/:requestHash/municipality (AUTO-EXECUTES)',
+          status: 'GET /api/properties/approvals/:requestHash/status',
+          note: '⚡ Auto-executes when all 3 approvals received'
+        }
       },
       transfers: {
-        configure: 'POST /api/transfers/configure',
-        approve: 'POST /api/transfers/approve',
-        accept: 'POST /api/transfers/accept',
-        execute: 'POST /api/transfers/execute',
-        status: 'GET /api/transfers/status',
-        details: 'GET /api/transfers/details',
-        hasApproved: 'GET /api/transfers/has-approved'
+        description: 'Property transfer operations',
+        request: 'POST /api/transfers/request',
+        approvals: {
+          description: 'Property transfer approval workflow',
+          approveFinancial: 'POST /api/transfers/approvals/:requestHash/financial',
+          approveRegistry: 'POST /api/transfers/approvals/:requestHash/registry-office',
+          approveMunicipality: 'POST /api/transfers/approvals/:requestHash/municipality (AUTO-EXECUTES)',
+          status: 'GET /api/transfers/approvals/:requestHash/status',
+          note: '⚡ Auto-executes when all 3 approvals received'
+        }
       },
-      identity: {
-        register: 'POST /api/identity/register',
-        verify: 'GET /api/identity/:walletAddress/verify'
-      },
-      approvalsV2: {
-        requestRegistration: 'POST /api/approvals/v2/registration/request',
-        approveFinancial: 'POST /api/approvals/v2/registration/:requestHash/financial',
-        approveRegistry: 'POST /api/approvals/v2/registration/:requestHash/registry-office',
-        approveMunicipality: 'POST /api/approvals/v2/registration/:requestHash/municipality (AUTO-EXECUTA)',
-        registrationStatus: 'GET /api/approvals/v2/registration/:requestHash/status',
-        requestTransfer: 'POST /api/approvals/v2/transfer/request',
-        approveTransferFinancial: 'POST /api/approvals/v2/transfer/:requestHash/financial',
-        approveTransferRegistry: 'POST /api/approvals/v2/transfer/:requestHash/registry-office',
-        approveTransferMunicipality: 'POST /api/approvals/v2/transfer/:requestHash/municipality (AUTO-EXECUTA)',
-        transferStatus: 'GET /api/approvals/v2/transfer/:requestHash/status',
-        note: '⚡ Execução é AUTOMÁTICA após a 3ª aprovação!'
+      admin: {
+        description: 'Role management endpoints (requires admin permissions)',
+        info: 'GET /api/admin/info',
+        grantRole: 'POST /api/admin/grant-role',
+        revokeRole: 'POST /api/admin/revoke-role',
+        grantInstitutionalRoles: 'POST /api/admin/grant-institutional-roles',
+        checkRole: 'POST /api/admin/check-role',
+        getRoles: 'GET /api/admin/roles/:address',
+        getAddressesWithRole: 'GET /api/admin/roles/:roleName/addresses',
+        note: '🔐 Admin endpoints for managing access control roles'
       }
     },
     documentation: {
-      readme: 'https://github.com/...',
       workflow: {
         registerProperty: [
-          '1. POST /api/properties/register - Registra imóvel no compliance e emite título'
+          '1. POST /api/properties/approvals/request - Request property registration',
+          '2. POST /api/properties/approvals/:hash/financial - Financial institution approves',
+          '3. POST /api/properties/approvals/:hash/registry-office - Registry office approves',
+          '4. POST /api/properties/approvals/:hash/municipality - Municipality approves (AUTO-EXECUTES)',
+          '5. GET /api/properties/approvals/:hash/status - Check approval status'
         ],
         transferProperty: [
-          '1. GET /api/approvers/recommended/list - Obter aprovadores necessários',
-          '2. POST /api/transfers/configure - Configurar transferência com aprovadores',
-          '3. POST /api/transfers/approve - Cada aprovador aprova (múltiplas chamadas)',
-          '4. POST /api/transfers/accept - Comprador aceita',
-          '5. POST /api/transfers/execute - Vendedor executa transferência final',
-          '6. GET /api/transfers/details - Verificar status a qualquer momento'
+          '1. POST /api/transfers/request - Request property transfer',
+          '2. POST /api/transfers/approvals/:hash/financial - Financial institution approves',
+          '3. POST /api/transfers/approvals/:hash/registry-office - Registry office approves',
+          '4. POST /api/transfers/approvals/:hash/municipality - Municipality approves (AUTO-EXECUTES)',
+          '5. GET /api/transfers/approvals/:hash/status - Check transfer status'
         ]
       }
     }
@@ -136,6 +124,46 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
   });
 });
 
+function startEventListener() {
+  try {
+    console.log('\n🎧 Iniciando Event Listener...\n');
+
+    // Path to event-listener.js (in production it's in the parent directory of dist)
+    const eventListenerPath = path.join(__dirname, '..', 'event-listener.js');
+
+    const eventListener = spawn('node', [eventListenerPath], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env
+    });
+
+    // Pipe stdout
+    eventListener.stdout.on('data', (data) => {
+      process.stdout.write(data);
+    });
+
+    // Pipe stderr
+    eventListener.stderr.on('data', (data) => {
+      process.stderr.write(data);
+    });
+
+    eventListener.on('error', (error) => {
+      console.error('❌ Erro ao iniciar event listener:', error.message);
+    });
+
+    eventListener.on('exit', (code, signal) => {
+      if (code !== 0 && code !== null) {
+        console.error(`❌ Event listener encerrado com código ${code}`);
+        console.log('🔄 Reiniciando event listener em 5 segundos...');
+        setTimeout(startEventListener, 5000);
+      }
+    });
+
+    console.log('✅ Event Listener iniciado!\n');
+  } catch (error: any) {
+    console.error('❌ Erro ao iniciar event listener:', error.message);
+  }
+}
+
 async function start() {
   try {
     console.log('\n🚀 Iniciando Besu Property Ledger API...\n');
@@ -151,9 +179,7 @@ async function start() {
 
     console.log('\n📝 Endereços dos contratos:');
     console.log(`  PropertyTitle: ${process.env.PROPERTY_TITLE_ADDRESS}`);
-    console.log(`  ApprovalsModule: ${process.env.APPROVALS_MODULE_ADDRESS}`);
     console.log(`  RegistryModule: ${process.env.REGISTRY_MODULE_ADDRESS}`);
-    console.log(`  ApproversRegistry: ${process.env.APPROVERS_REGISTRY_ADDRESS}`);
     console.log(`  IdentityRegistry: ${process.env.IDENTITY_REGISTRY_ADDRESS}`);
     console.log(`  Compliance: ${process.env.MODULAR_COMPLIANCE_ADDRESS}`);
 
@@ -161,17 +187,14 @@ async function start() {
       console.log(`\n✅ API rodando em http://localhost:${PORT}`);
       console.log(`📖 Documentação: http://localhost:${PORT}/`);
       console.log(`🏥 Health check: http://localhost:${PORT}/health`);
-      console.log('\n📋 Endpoints principais:');
-      console.log(`   Aprovadores: http://localhost:${PORT}/api/approvers`);
-      console.log(`   Propriedades: http://localhost:${PORT}/api/properties`);
-      console.log(`   Transferências: http://localhost:${PORT}/api/transfers`);
-      console.log(`   Aprovações Manuais: http://localhost:${PORT}/api/approvals`);
-      console.log(`   Aprovações V2 (Pending): http://localhost:${PORT}/api/approvals/v2`);
-      console.log(`   Sistema (Pause/Agents/Freeze): http://localhost:${PORT}/api/system`);
-      console.log(`   Tokens (Mint/Burn/Transfer): http://localhost:${PORT}/api/tokens`);
-      console.log(`   Info & Config: http://localhost:${PORT}/api/info`);
-      console.log(`   Identidade (Registro): http://localhost:${PORT}/api/identity`);
+      console.log('\n📋 Rotas principais:');
+      console.log(`   🏠 Propriedades: http://localhost:${PORT}/api/properties`);
+      console.log(`   🔄 Transferências: http://localhost:${PORT}/api/transfers`);
+      console.log(`   🔐 Admin (Roles): http://localhost:${PORT}/api/admin`);
       console.log('\n🎯 Pronto para receber requisições!\n');
+
+      // Start event listener
+      startEventListener();
     });
 
   } catch (error: any) {

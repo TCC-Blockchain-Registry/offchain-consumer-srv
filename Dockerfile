@@ -13,9 +13,12 @@ FROM node:18-alpine
 WORKDIR /app
 
 COPY package*.json ./
+COPY event-listener.js ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/abis ./dist/abis
+COPY --from=builder /app/src/abis ./src/abis
 
 EXPOSE 3001
 

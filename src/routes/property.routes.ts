@@ -29,19 +29,12 @@ router.post('/register', async (req: Request, res: Response) => {
         error: 'Tipo inválido. Use: 0=URBANO, 1=RURAL, 2=LITORAL'
       });
     }
-    
-    const result = await propertyService.registerProperty({
-      matriculaId: Number(matriculaId),
-      folha: Number(folha || 1),
-      comarca: comarca || 'Não informada',
-      endereco,
-      metragem: Number(metragem || 0),
-      proprietario,
-      matriculaOrigem: Number(matriculaOrigem),
-      tipo: Number(tipo) as PropertyType,
-      isRegular: Boolean(isRegular)
-    });
-    
+
+    const result = await propertyService.requestPropertyRegistration(
+      Number(matriculaId),
+      proprietario
+    );
+
     res.json({
       success: true,
       message: 'Solicitação de registro criada com sucesso. Aguardando aprovações.',
@@ -49,9 +42,9 @@ router.post('/register', async (req: Request, res: Response) => {
         requestHash: result.requestHash,
         txHash: result.txHash,
         blockNumber: result.blockNumber,
-        matriculaId: result.matriculaId,
-        beneficiary: result.beneficiary,
-        status: result.status,
+        matriculaId: Number(matriculaId),
+        beneficiary: proprietario,
+        status: 'PENDING_APPROVALS',
         nextSteps: [
           'Aprovação Financial (Instituição Financeira)',
           'Aprovação Registry Office (Cartório)',
@@ -68,6 +61,181 @@ router.post('/register', async (req: Request, res: Response) => {
     });
   }
 });
+
+/**
+ * @route POST /api/properties/approvals/request
+ * @desc Solicita aprovação de registro de propriedade (fluxo de aprovações)
+ */
+router.post('/approvals/request', async (req: Request, res: Response) => {
+  try {
+    const { matriculaId, beneficiary } = req.body;
+
+    if (!matriculaId || !beneficiary) {
+      return res.status(400).json({
+        error: 'Campos obrigatórios: matriculaId, beneficiary'
+      });
+    }
+
+    const result = await propertyService.requestPropertyRegistration(
+      Number(matriculaId),
+      beneficiary
+    );
+
+    res.json({
+      success: true,
+      message: 'Solicitação de aprovação criada com sucesso',
+      data: result
+    });
+
+  } catch (error: any) {
+    console.error('Erro ao solicitar aprovação:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha ao solicitar aprovação',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /api/properties/approvals/:requestHash/financial
+ * @desc Aprova registro como Instituição Financeira
+ */
+router.post('/approvals/:requestHash/financial', async (req: Request, res: Response) => {
+  try {
+    const { requestHash } = req.params;
+
+    const result = await propertyService.approveAsFinancial(requestHash);
+
+    res.json({
+      success: true,
+      message: 'Registro aprovado pela Instituição Financeira',
+      data: result
+    });
+
+  } catch (error: any) {
+    console.error('Erro ao aprovar (financial):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha na aprovação financeira',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /api/properties/approvals/:requestHash/registry-office
+ * @desc Aprova registro como Cartório
+ */
+router.post('/approvals/:requestHash/registry-office', async (req: Request, res: Response) => {
+  try {
+    const { requestHash } = req.params;
+
+    const result = await propertyService.approveAsRegistryOffice(requestHash);
+
+    res.json({
+      success: true,
+      message: 'Registro aprovado pelo Cartório',
+      data: result
+    });
+
+  } catch (error: any) {
+    console.error('Erro ao aprovar (registry):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha na aprovação do cartório',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * @route POST /api/properties/approvals/:requestHash/municipality
+ * @desc Aprova registro como Prefeitura (auto-executa quando última aprovação)
+ */
+router.post('/approvals/:requestHash/municipality', async (req: Request, res: Response) => {
+  try {
+    const { requestHash } = req.params;
+
+    const result = await propertyService.approveAsMunicipality(requestHash);
+
+    res.json({
+      success: true,
+      message: 'Registro aprovado pela Prefeitura (auto-executado)',
+      data: result
+    });
+
+  } catch (error: any) {
+    console.error('Erro ao aprovar (municipality):', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha na aprovação da prefeitura',
+      details: error.message
+    });
+  }
+});
+
+/**
+ * @route GET /api/properties/approvals/:requestHash/status
+ * @desc Consulta status de uma aprovação de registro pendente
+ */
+router.get('/approvals/:requestHash/status', async (req: Request, res: Response) => {
+  try {
+    const { requestHash } = req.params;
+
+    const status = await propertyService.getRegistrationStatus(requestHash);
+
+    if (!status.exists) {
+      return res.status(404).json({
+        success: false,
+        error: 'Solicitação de aprovação não encontrada'
+      });
+    }
+
+    res.json({
+      success: true,
+      requestHash,
+      status
+    });
+
+  } catch (error: any) {
+    console.error('Erro ao consultar status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Falha ao consultar status',
+      details: error.message
+    });
+  }
+});
+
+// Generic route with :matriculaId parameter MUST be after all specific routes
+router.get('/:matriculaId', async (req: Request, res: Response) => {
+  try {
+    const { matriculaId } = req.params;
+    const details = await propertyService.getPropertyDetails(Number(matriculaId));
+
+    res.json({
+      success: true,
+      data: {
+        matriculaId: Number(matriculaId),
+        currentOwner: details.owner,
+        exists: details.exists,
+        hasComplianceData: details.complianceInfo !== null,
+        complianceInfo: details.complianceInfo ? {
+          ...details.complianceInfo,
+          typeName: PropertyType[details.complianceInfo.tipo]
+        } : null
+      }
+    });
+
+  } catch (error: any) {
+    res.status(404).json({
+      error: 'Propriedade não encontrada',
+      details: error.message
+    });
+  }
+});
+
 
 // Specific routes MUST come before generic /:matriculaId route
 router.get('/compliance/:matriculaId', async (req: Request, res: Response) => {
@@ -143,48 +311,6 @@ router.get('/count/:address', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/system/pause-status', async (req: Request, res: Response) => {
-  try {
-    const isPaused = await propertyService.isTransferPaused();
-
-    res.json({
-      success: true,
-      isPaused,
-      message: isPaused ? '⏸️ Sistema pausado - Transferências bloqueadas' : '▶️ Sistema ativo'
-    });
-
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro ao verificar status do sistema',
-      details: error.message
-    });
-  }
-});
-
-// Generic route with :matriculaId parameter MUST be after all specific routes
-router.get('/:matriculaId', async (req: Request, res: Response) => {
-  try {
-    const { matriculaId } = req.params;
-    const details = await propertyService.getPropertyDetails(Number(matriculaId));
-
-    res.json({
-      success: true,
-      data: {
-        ...details.complianceInfo,
-        currentOwner: details.owner,
-        exists: details.exists,
-        frozen: details.frozen,
-        typeName: PropertyType[details.complianceInfo.tipo]
-      }
-    });
-
-  } catch (error: any) {
-    res.status(404).json({
-      error: 'Propriedade não encontrada',
-      details: error.message
-    });
-  }
-});
 
 router.get('/:matriculaId/owner', async (req: Request, res: Response) => {
   try {
@@ -224,26 +350,6 @@ router.get('/:matriculaId/exists', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:matriculaId/frozen', async (req: Request, res: Response) => {
-  try {
-    const { matriculaId } = req.params;
-    const frozen = await propertyService.isPropertyFrozen(Number(matriculaId));
-    
-    res.json({
-      success: true,
-      matriculaId: Number(matriculaId),
-      frozen,
-      message: frozen ? '❄️ Propriedade congelada - Transferências bloqueadas' : '✅ Propriedade regular'
-    });
-    
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro ao verificar freeze',
-      details: error.message
-    });
-  }
-});
-
 router.put('/:matriculaId', async (req: Request, res: Response) => {
   try {
     const { matriculaId } = req.params;
@@ -272,121 +378,6 @@ router.put('/:matriculaId', async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(500).json({
       error: 'Erro ao atualizar propriedade',
-      details: error.message
-    });
-  }
-});
-
-router.post('/:matriculaId/freeze', async (req: Request, res: Response) => {
-  try {
-    const { matriculaId } = req.params;
-
-    const txHash = await propertyService.freezeProperty(Number(matriculaId), true);
-
-    res.json({
-      success: true,
-      message: '❄️ Propriedade congelada - Transferências bloqueadas',
-      matriculaId: Number(matriculaId),
-      frozen: true,
-      txHash
-    });
-
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro ao congelar propriedade',
-      details: error.message
-    });
-  }
-});
-
-router.post('/:matriculaId/unfreeze', async (req: Request, res: Response) => {
-  try {
-    const { matriculaId } = req.params;
-
-    const txHash = await propertyService.freezeProperty(Number(matriculaId), false);
-
-    res.json({
-      success: true,
-      message: '🔥 Propriedade descongelada - Transferências permitidas',
-      matriculaId: Number(matriculaId),
-      frozen: false,
-      txHash
-    });
-
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro ao descongelar propriedade',
-      details: error.message
-    });
-  }
-});
-
-router.post('/batch-freeze', async (req: Request, res: Response) => {
-  try {
-    const { matriculas, freeze } = req.body;
-
-    if (!matriculas || !Array.isArray(matriculas) || matriculas.length === 0) {
-      return res.status(400).json({
-        error: 'Campo obrigatório: matriculas (array de números)'
-      });
-    }
-
-    if (freeze === undefined) {
-      return res.status(400).json({
-        error: 'Campo obrigatório: freeze (boolean)'
-      });
-    }
-
-    const txHash = await propertyService.batchFreezeProperties(
-      matriculas.map(Number),
-      Boolean(freeze)
-    );
-
-    res.json({
-      success: true,
-      message: `${freeze ? '❄️ Propriedades congeladas' : '🔥 Propriedades descongeladas'}`,
-      count: matriculas.length,
-      matriculas,
-      freeze: Boolean(freeze),
-      txHash
-    });
-
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro no batch freeze',
-      details: error.message
-    });
-  }
-});
-
-router.post('/forced-transfer', async (req: Request, res: Response) => {
-  try {
-    const { from, to, matricula } = req.body;
-
-    if (!from || !to || !matricula) {
-      return res.status(400).json({
-        error: 'Campos obrigatórios: from, to, matricula'
-      });
-    }
-
-    const txHash = await propertyService.forcedTransferProperty(
-      from,
-      to,
-      Number(matricula)
-    );
-
-    res.json({
-      success: true,
-      message: '⚠️ Transferência forçada executada (recuperação/emergência)',
-      from,
-      to,
-      matricula: Number(matricula),
-      txHash
-    });
-
-  } catch (error: any) {
-    res.status(500).json({
-      error: 'Erro na transferência forçada',
       details: error.message
     });
   }
