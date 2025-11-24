@@ -102,7 +102,10 @@ class EventListenerService {
         // PropertyIssued
         propertyTitle.on('PropertyIssued', async (matricula, owner, event) => {
             console.log(`  → PropertyIssued: ${matricula} para ${owner}`);
-            
+
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/properties/issued`;
+
             await this.sendToWebhook({
                 eventType: 'PROPERTY_ISSUED',
                 matricula: matricula.toString(),
@@ -110,7 +113,7 @@ class EventListenerService {
                 transactionHash: event.transactionHash,
                 blockNumber: event.blockNumber,
                 timestamp: new Date().toISOString()
-            });
+            }, endpoint);
         });
         
         // PropertyTransferred
@@ -133,13 +136,16 @@ class EventListenerService {
         propertyTitle.on('PropertyFrozen', async (matricula, frozen, event) => {
             console.log(`  → PropertyFrozen: ${matricula} (${frozen ? 'congelado' : 'descongelado'})`);
 
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/properties/frozen`;
+
             await this.sendToWebhook({
                 eventType: 'PROPERTY_FROZEN',
                 matricula: matricula.toString(),
                 frozen: frozen,
                 transactionHash: event.transactionHash,
                 timestamp: new Date().toISOString()
-            });
+            }, endpoint);
         });
 
         // ========== V2 Registration Events ==========
@@ -168,6 +174,9 @@ class EventListenerService {
         propertyTitle.on('RegistrationApproved', async (requestHash, institution, approver, event) => {
             console.log(`  → RegistrationApproved: ${institution} por ${approver}`);
 
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/properties/registration-approved`;
+
             await this.sendToWebhook({
                 eventType: 'REGISTRATION_APPROVED',
                 requestHash: requestHash,
@@ -176,7 +185,7 @@ class EventListenerService {
                 transactionHash: event.transactionHash,
                 blockNumber: event.blockNumber,
                 timestamp: new Date().toISOString()
-            });
+            }, endpoint);
         });
 
         // RegistrationExecuted
@@ -201,8 +210,20 @@ class EventListenerService {
         // ========== V2 Transfer Events ==========
 
         // TransferRequested
-        propertyTitle.on('TransferRequested', async (requestHash, matricula, from, to, requester, event) => {
+        propertyTitle.on('TransferRequested', async (...args) => {
+            // O último argumento é sempre o objeto do evento
+            const event = args[args.length - 1];
+
+            // Extrair parâmetros do evento
+            const requestHash = event.args[0];
+            const matricula = event.args[1];
+            const from = event.args[2];
+            const to = event.args[3];
+            const requester = event.args[4];
+
             console.log(`  → TransferRequested: Matrícula ${matricula} - ${from} → ${to}`);
+            console.log(`  → DEBUG - requestHash:`, requestHash);
+            console.log(`  → DEBUG - transactionHash:`, event.transactionHash);
 
             // Enviar para endpoint específico de transferência requisitada
             const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
@@ -210,7 +231,7 @@ class EventListenerService {
 
             await this.sendToWebhook({
                 eventType: 'TRANSFER_REQUESTED',
-                requestHash: requestHash,
+                transferHash: requestHash,
                 matriculaId: Number(matricula.toString()),
                 from: from,
                 to: to,
@@ -225,6 +246,9 @@ class EventListenerService {
         propertyTitle.on('TransferApproved', async (requestHash, institution, approver, event) => {
             console.log(`  → TransferApproved: ${institution} por ${approver}`);
 
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/transfers/transfer-approved`;
+
             await this.sendToWebhook({
                 eventType: 'TRANSFER_APPROVED',
                 requestHash: requestHash,
@@ -233,7 +257,7 @@ class EventListenerService {
                 transactionHash: event.transactionHash,
                 blockNumber: event.blockNumber,
                 timestamp: new Date().toISOString()
-            });
+            }, endpoint);
         });
 
         // TransferExecuted
@@ -271,7 +295,10 @@ class EventListenerService {
             
             try {
                 const property = await registryModule.getProperty(matriculaId);
-                
+
+                const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+                const endpoint = `${baseUrl}/api/webhooks/blockchain/properties/registered`;
+
                 await this.sendToWebhook({
                     eventType: 'PROPERTY_REGISTERED',
                     matricula: matriculaId.toString(),
@@ -284,7 +311,7 @@ class EventListenerService {
                     isRegular: property.isRegular,
                     transactionHash: event.transactionHash,
                     timestamp: new Date().toISOString()
-                });
+                }, endpoint);
             } catch (error) {
                 console.error(`Erro ao buscar dados da propriedade: ${error.message}`);
             }
@@ -296,14 +323,17 @@ class EventListenerService {
             
             try {
                 const property = await registryModule.getProperty(matriculaId);
-                
+
+                const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+                const endpoint = `${baseUrl}/api/webhooks/blockchain/properties/updated`;
+
                 await this.sendToWebhook({
                     eventType: 'PROPERTY_UPDATED',
                     matricula: matriculaId.toString(),
                     isRegular: property.isRegular,
                     transactionHash: event.transactionHash,
                     timestamp: new Date().toISOString()
-                });
+                }, endpoint);
             } catch (error) {
                 console.error(`Erro ao buscar dados da propriedade: ${error.message}`);
             }
@@ -337,6 +367,7 @@ class EventListenerService {
 
                 await this.sendToWebhook({
                     matriculaId: Number(matriculaId.toString()),
+                    transferHash: transferHash,  // Request hash from blockchain
                     seller: from,
                     buyer: to,
                     transactionHash: event.transactionHash
@@ -378,6 +409,9 @@ class EventListenerService {
             try {
                 // ApproversRegistry removido - usar apenas endereço
 
+                const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+                const endpoint = `${baseUrl}/api/webhooks/blockchain/approvals/approved`;
+
                 await this.sendToWebhook({
                     eventType: 'TRANSFER_APPROVED',
                     transferHash: transferHash,
@@ -393,7 +427,7 @@ class EventListenerService {
                     },
                     transactionHash: event.transactionHash,
                     timestamp: new Date().toISOString()
-                });
+                }, endpoint);
             } catch (error) {
                 console.error(`Erro ao buscar aprovador: ${error.message}`);
             }
@@ -402,20 +436,26 @@ class EventListenerService {
         // BuyerAccepted
         approvalsModule.on('BuyerAccepted', async (transferHash, buyer, event) => {
             console.log(`  → BuyerAccepted: ${buyer}`);
-            
+
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/approvals/buyer-accepted`;
+
             await this.sendToWebhook({
                 eventType: 'BUYER_ACCEPTED',
                 transferHash: transferHash,
                 buyer: buyer,
                 transactionHash: event.transactionHash,
                 timestamp: new Date().toISOString()
-            });
+            }, endpoint);
         });
-        
+
         // TransferConfigCleared
         approvalsModule.on('TransferConfigCleared', async (transferHash, event) => {
             console.log(`  → TransferConfigCleared: ${transferHash}`);
-            
+
+            const baseUrl = this.webhookUrl.replace(/\/api\/webhooks\/blockchain.*$/, '');
+            const endpoint = `${baseUrl}/api/webhooks/blockchain/approvals/config-cleared`;
+
             await this.sendToWebhook({
                 eventType: 'TRANSFER_CONFIG_CLEARED',
                 transferHash: transferHash,
