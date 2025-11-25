@@ -1,0 +1,124 @@
+@startuml
+!theme plain
+skinparam ParticipantBackgroundColor WhiteSmoke
+skinparam SequenceLifeLineBorderColor Black
+skinparam SequenceGroupBackgroundColor LightBlue
+
+title Registro de Propriedade - Parte 2: Aprovações e Execução
+
+actor "Instituição\nFinanceira" as IF
+actor "Cartório" as Cartorio
+actor "Prefeitura" as Prefeitura
+participant "Offchain\nConsumer" as OC
+participant "Blockchain\n(Besu)" as BC
+participant "Event\nListener" as EL
+participant "Orchestrator" as Orch
+database "PostgreSQL" as DB
+
+note over IF, DB
+**ESTADO INICIAL:**
+Propriedade aguardando 3 aprovações
+requestHash já definido na blockchain
+end note
+
+== Aprovação 1/3: Instituição Financeira ==
+
+IF -> OC: **POST /api/properties/approve**\n{\n  requestHash: "0xabc...",\n  institution: "FINANCIAL"\n}
+activate OC
+
+OC -> BC: approveRegistrationAsFinancial(requestHash)
+activate BC
+
+BC -> BC: Validate:\n- pendingRegistrations[requestHash].exists\n- !financialApproved
+
+BC -> BC: pendingRegistrations[requestHash]\n  .financialApproved = true
+
+BC -> BC: **Emit RegistrationApproved**\n{\n  requestHash,\n  institution: "FINANCIAL",\n  approver: msg.sender\n}
+
+BC --> EL: Event detected
+deactivate BC
+activate EL
+
+EL -> Orch: POST /webhooks/.../registration-approved\n{\n  requestHash,\n  institution: "FINANCIAL",\n  approver\n}
+activate Orch
+
+Orch -> DB: Record approval 1/3
+Orch --> EL: 200 OK
+deactivate Orch
+deactivate EL
+deactivate OC
+
+== Aprovação 2/3: Cartório ==
+
+Cartorio -> OC: **POST /api/properties/approve**\n{\n  requestHash: "0xabc...",\n  institution: "REGISTRY_OFFICE"\n}
+activate OC
+
+OC -> BC: approveRegistrationAsRegistryOffice(requestHash)
+activate BC
+
+BC -> BC: pendingRegistrations[requestHash]\n  .registryOfficeApproved = true
+
+BC -> BC: **Emit RegistrationApproved**\n{\n  requestHash,\n  institution: "REGISTRY_OFFICE",\n  approver\n}
+
+BC --> EL: Event detected
+deactivate BC
+activate EL
+
+EL -> Orch: POST /webhooks/.../registration-approved
+activate Orch
+Orch -> DB: Record approval 2/3
+Orch --> EL: 200 OK
+deactivate Orch
+deactivate EL
+deactivate OC
+
+== Aprovação 3/3: Prefeitura (Auto-execução) ==
+
+Prefeitura -> OC: **POST /api/properties/approve**\n{\n  requestHash: "0xabc...",\n  institution: "MUNICIPALITY"\n}
+activate OC
+
+OC -> BC: approveRegistrationAsMunicipality(requestHash)
+activate BC
+
+BC -> BC: pendingRegistrations[requestHash]\n  .municipalityApproved = true
+
+BC -> BC: **Emit RegistrationApproved**\n{\n  requestHash,\n  institution: "MUNICIPALITY",\n  approver\n}
+
+BC -> BC: **Check: All 3 approvals granted?**\nfinancialApproved ✓\nregistryOfficeApproved ✓\nmunicipalityApproved ✓
+
+BC -> BC: **AUTO-EXECUTE:**\n_executeRegistration(requestHash)
+
+BC -> BC: mint(beneficiary, matricula)\nTransfer tokens: 0x0 → beneficiary
+
+BC -> BC: propertyExists[matricula] = true\npropertyOwner[matricula] = beneficiary
+
+BC -> BC: pendingRegistrations[requestHash]\n  .executed = true
+
+BC -> BC: **Emit RegistrationExecuted**\n{\n  requestHash,\n  matricula,\n  beneficiary\n}
+
+BC --> EL: Event detected
+deactivate BC
+activate EL
+
+EL -> Orch: POST /webhooks/.../registration-executed\n{\n  requestHash,\n  matriculaId,\n  beneficiary,\n  transactionHash\n}
+activate Orch
+
+Orch -> DB: UPDATE properties\nSET status = 'OK',\n    proprietario = beneficiary\nWHERE request_hash = ?
+activate DB
+DB --> Orch: Updated
+deactivate DB
+
+Orch --> EL: 200 OK
+deactivate Orch
+deactivate EL
+deactivate OC
+
+note over IF, DB
+**RESULTADO FINAL:**
+✅ Propriedade registrada com sucesso
+✅ Tokens mintados para o proprietário
+✅ Status: OK
+✅ Ownership estabelecido na blockchain
+end note
+
+@enduml

@@ -1,0 +1,136 @@
+@startuml
+!theme plain
+skinparam ParticipantBackgroundColor WhiteSmoke
+skinparam SequenceLifeLineBorderColor Black
+
+title Diagrama de Sequência - Transferência de Propriedade
+
+actor "Vendedor" as Seller
+actor "Comprador" as Buyer
+participant "Frontend" as FE
+participant "BFF Gateway" as BFF
+participant "Orchestrator" as Orch
+database "PostgreSQL" as DB
+queue "RabbitMQ" as MQ
+participant "Queue Worker" as QW
+participant "Offchain Consumer" as OC
+participant "Blockchain (Besu)" as BC
+participant "Event Listener" as EL
+
+Buyer -> FE: Seleciona propriedade para comprar
+FE -> BFF: POST /api/transfers/request\n{matriculaId, buyerCpf}
+BFF -> Orch: POST /transfers/request + JWT
+
+Orch -> Orch: Validar propriedade (status OK)
+Orch -> DB: Verificar transferência ativa
+DB --> Orch: Nenhuma transferência ativa
+
+Orch -> DB: Buscar buyer por CPF
+DB --> Orch: Buyer data {id, walletAddress}
+
+Orch -> DB: INSERT transfer\nstatus = PENDENTE
+DB --> Orch: Transfer ID created
+
+Orch -> MQ: Publish CONFIGURE_TRANSFER job\n{transferId, seller, buyer, matricula, approvers[]}
+Orch -> DB: UPDATE status = CONFIGURANDO
+Orch --> BFF: 201 Created {transferId}
+BFF --> FE: Transfer initiated
+FE --> Buyer: Transferência iniciada
+
+MQ --> QW: Consume CONFIGURE_TRANSFER job
+QW -> OC: POST /api/transfers/request\n{from, to, matricula}
+
+OC -> OC: Build transaction
+OC -> BC: requestPropertyTransfer(from, to, matricula)
+BC --> OC: TX Hash: 0xdef...
+
+BC -> BC: Mine transaction
+BC -> BC: Create pending transfer struct\nCalculate requestHash
+BC -> BC: Emit TransferRequested\n{requestHash, matricula, from, to, requester}
+
+BC --> EL: Event detected
+EL -> EL: Extract event.args[0] = requestHash\nExtract event.transactionHash
+EL -> Orch: POST /webhooks/.../transfer-requested\n{transferHash, matriculaId, from, to, txHash}
+Orch -> DB: UPDATE transfer\nrequest_hash, blockchain_tx_hash\nstatus = AGUARDANDO_APROVACOES
+Orch --> EL: 200 OK
+
+== Fase de Aprovações (3 instituições) ==
+
+Seller -> FE: Instituição Financeira aprova
+FE -> BFF: POST /api/transfers/{id}/approve
+BFF -> Orch: POST /transfers/{id}/approve\n{approverId}
+Orch -> MQ: Publish APPROVE_TRANSFER job\n{transferId, approver: FINANCIAL}
+MQ --> QW: Consume job
+QW -> OC: POST /api/transfers/approve\n{requestHash, institution: FINANCIAL}
+OC -> BC: approveTransferAsFinancial(requestHash)
+BC -> BC: pendingTransfers[requestHash]\n.financialApproved = true
+BC -> BC: Emit TransferApproved\n{requestHash, "FINANCIAL", approverAddress}
+BC --> EL: Event detected
+EL -> Orch: POST /webhooks/.../transfer-approved\n{requestHash, institution, approver}
+Orch -> DB: Record approval 1/3
+Orch --> EL: 200 OK
+
+note over BC: Cartório aprova (2/3)
+
+Seller -> FE: Cartório aprova
+FE -> BFF: POST /api/transfers/{id}/approve
+BFF -> Orch: POST /transfers/{id}/approve
+Orch -> MQ: Publish APPROVE_TRANSFER job
+MQ --> QW: Consume
+QW -> OC: POST /api/transfers/approve\n{requestHash, institution: REGISTRY_OFFICE}
+OC -> BC: approveTransferAsRegistryOffice(requestHash)
+BC -> BC: pendingTransfers[requestHash]\n.registryOfficeApproved = true
+BC -> BC: Emit TransferApproved
+BC --> EL: Event detected
+EL -> Orch: POST /webhooks/.../transfer-approved
+Orch -> DB: Record approval 2/3
+
+note over BC: Prefeitura aprova (3/3)
+
+Seller -> FE: Prefeitura aprova
+FE -> BFF: POST /api/transfers/{id}/approve
+BFF -> Orch: POST /transfers/{id}/approve
+Orch -> MQ: Publish APPROVE_TRANSFER job
+MQ --> QW: Consume
+QW -> OC: POST /api/transfers/approve\n{requestHash, institution: MUNICIPALITY}
+OC -> BC: approveTransferAsMunicipality(requestHash)
+BC -> BC: pendingTransfers[requestHash]\n.municipalityApproved = true
+BC -> BC: Emit TransferApproved
+BC --> EL: Event detected
+EL -> Orch: POST /webhooks/.../transfer-approved
+Orch -> DB: Record approval 3/3
+
+== Aceitação do Comprador ==
+
+Buyer -> FE: Aceita a transferência
+FE -> BFF: POST /api/transfers/{id}/accept
+BFF -> Orch: POST /transfers/{id}/accept\n{buyerId}
+Orch -> Orch: Validar buyer é o correto
+Orch -> MQ: Publish ACCEPT_TRANSFER job
+MQ --> QW: Consume
+QW -> OC: POST /api/transfers/accept\n{requestHash, buyerAddress}
+OC -> BC: buyerAcceptsTransfer(requestHash)
+
+BC -> BC: Check: all 3 approvals + buyer acceptance?
+BC -> BC: **Auto-execute transfer!**\nTransfer tokens: seller → buyer\nUpdate propertyOwner[matricula]
+BC -> BC: pendingTransfers[requestHash].executed = true
+BC -> BC: Emit TransferExecuted\n{requestHash, matricula, from, to}
+
+BC --> EL: Event detected
+EL -> Orch: POST /webhooks/.../transfer-executed\n{requestHash, matriculaId, from, to, txHash}
+Orch -> DB: UPDATE property\nproprietario = buyer.id\nstatus = OK
+Orch -> DB: UPDATE transfer\nstatus = CONCLUIDA
+Orch --> EL: 200 OK
+
+note over FE: Frontend polling ou WebSocket
+
+FE -> BFF: GET /api/transfers/{id}
+BFF -> Orch: GET /transfers/{id}
+Orch -> DB: SELECT transfer
+DB --> Orch: {status: CONCLUIDA, ...}
+Orch --> BFF: Transfer completed
+BFF --> FE: Transfer data
+FE --> Buyer: Transferência concluída! ✅
+FE --> Seller: Propriedade transferida
+
+@enduml

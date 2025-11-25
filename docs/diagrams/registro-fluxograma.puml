@@ -1,0 +1,57 @@
+@startuml
+!theme plain
+skinparam ActivityBackgroundColor WhiteSmoke
+skinparam ActivityBorderColor Black
+skinparam ActivityDiamondBackgroundColor LightYellow
+skinparam ActivityDiamondBorderColor Black
+
+title Fluxograma - Registro de Propriedade
+
+start
+:Usuário solicita registro;
+
+if (Validar dados\nda propriedade) then (válido)
+  if (Matrícula\njá existe?) then (não)
+    :Criar registro no BD\n**Status: PENDENTE**;
+    :Publicar job\n**REGISTER_PROPERTY**\nno RabbitMQ;
+    :Atualizar status:\n**PROCESSANDO_REGISTRO**;
+
+    :Queue Worker\nconsome job;
+    :Chamar Offchain API\n/api/properties/register;
+
+    :Construir transação\nrequestPropertyRegistration();
+    :Submeter transação\npara blockchain;
+    :Aguardar confirmação\nda transação;
+
+    if (Evento\nRegistrationRequested\nemitido?) then (sim)
+      :Event Listener\nenvia webhook;
+      :Orchestrator atualiza\n**request_hash** e **tx_hash**;
+
+      partition "Fase de Aprovações" {
+        repeat
+          :Aguardar aprovações;
+          :Aprovação recebida\n(Financial/Registry/Municipality);
+        repeat while (Todas as 3\naprovações?) is (não) not (sim)
+      }
+
+      :Auto-execução:\n**Mint tokens**;
+      :Evento **RegistrationExecuted**\nemitido;
+      :Event Listener\nenvia webhook;
+      :Atualizar propriedade\n**Status: OK**;
+
+      stop
+    else (não)
+      #Pink:Falha na transação;
+      stop
+    endif
+
+  else (sim)
+    #Pink:Retornar erro:\nPropriedade já existe;
+    stop
+  endif
+else (inválido)
+  #Pink:Retornar erro\nde validação;
+  stop
+endif
+
+@enduml

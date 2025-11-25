@@ -1,0 +1,74 @@
+@startuml
+!theme plain
+skinparam ActivityBackgroundColor WhiteSmoke
+skinparam ActivityBorderColor Black
+skinparam ActivityDiamondBackgroundColor LightYellow
+
+title Fluxograma - Transferência de Propriedade
+
+start
+:Comprador solicita\ntransferência;
+
+if (Validar\ntransferência) then (válido)
+  if (Propriedade\nexiste e OK?) then (sim)
+    if (Já existe\ntransferência\nativa?) then (não)
+      :Criar transferência no BD\n**Status: PENDENTE**;
+      :Publicar job\n**CONFIGURE_TRANSFER**;
+      :Status:\n**CONFIGURANDO**;
+
+      :Queue Worker\nconsome job;
+      :Chamar Offchain API\n/api/transfers/request;
+
+      :Construir transação\nrequestPropertyTransfer();
+      :Submeter transação\npara blockchain;
+      :Aguardar confirmação;
+
+      if (Evento\nTransferRequested\nemitido?) then (sim)
+        :Event Listener\nenvia webhook;
+        :Orchestrator atualiza\n**request_hash** e **tx_hash**;
+        :Status:\n**AGUARDANDO_APROVACOES**;
+
+        partition "Fase de Aprovações" {
+          repeat
+            :Aguardar aprovações;
+            fork
+              :Aprovação Financeira\npublishApproveTransferJob;
+            fork again
+              :Aprovação Cartório\npublishApproveTransferJob;
+            fork again
+              :Aprovação Prefeitura\npublishApproveTransferJob;
+            end fork
+
+            :Queue Worker\nprocessa aprovação;
+            :Blockchain:\napproveTransferAs*();
+            :Evento **TransferApproved**;
+            :Webhook: record approval;
+          repeat while (Todas 3\naprovações?) is (não) not (sim)
+        }
+
+        :Auto-execução:\n**Transfer tokens**;
+        :Evento **TransferExecuted**\nemitido;
+        :Event Listener\nenvia webhook;
+        :Atualizar proprietário\nna propriedade;
+        :Status transferência:\n**CONCLUIDA**;
+
+        stop
+      else (não)
+        #Pink:Falha na transação;
+        stop
+      endif
+
+    else (sim)
+      #Pink:Transferência já\nem andamento;
+      stop
+    endif
+  else (não)
+    #Pink:Propriedade não existe\nou não está OK;
+    stop
+  endif
+else (inválido)
+  #Pink:Retornar erro;
+  stop
+endif
+
+@enduml

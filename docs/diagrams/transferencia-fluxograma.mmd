@@ -1,0 +1,76 @@
+%%{init: {'theme':'base'}}%%
+flowchart TD
+    Start([Comprador solicita<br/>transferência]) --> ValidateTransfer{Validar<br/>transferência}
+    ValidateTransfer -->|Inválido| Error1[Retornar erro]
+    ValidateTransfer -->|Válido| CheckProperty{Propriedade<br/>existe e OK?}
+
+    CheckProperty -->|Não| Error2[Propriedade não existe<br/>ou não está OK]
+    CheckProperty -->|Sim| CheckActive{Já existe<br/>transferência<br/>ativa?}
+
+    CheckActive -->|Sim| Error3[Transferência já<br/>em andamento]
+    CheckActive -->|Não| CreateTransfer[Criar transferência no BD<br/>Status: PENDENTE]
+
+    CreateTransfer --> PublishConfigJob[Publicar job<br/>CONFIGURE_TRANSFER]
+    PublishConfigJob --> UpdateStatus1[Status:<br/>CONFIGURANDO]
+
+    UpdateStatus1 --> QueueWorker[Queue Worker<br/>consome job]
+    QueueWorker --> CallOffchain[Chamar Offchain API<br/>/api/transfers/request]
+
+    CallOffchain --> BuildTx[Construir transação<br/>requestPropertyTransfer]
+    BuildTx --> SubmitTx[Submeter transação<br/>para blockchain]
+
+    SubmitTx --> WaitConfirm[Aguardar confirmação]
+    WaitConfirm --> EventRequested{Evento<br/>TransferRequested<br/>emitido?}
+
+    EventRequested -->|Sim| Webhook1[Event Listener<br/>envia webhook]
+    EventRequested -->|Não| Error4[Falha na transação]
+
+    Webhook1 --> UpdateHash[Orchestrator atualiza<br/>request_hash e tx_hash]
+    UpdateHash --> UpdateStatus2[Status:<br/>AGUARDANDO_APROVACOES]
+
+    UpdateStatus2 --> WaitApprovals{Aguardar<br/>aprovações}
+
+    WaitApprovals -->|Financial| ApprovalF[Aprovação Financeira<br/>publishApproveTransferJob]
+    WaitApprovals -->|Registry| ApprovalR[Aprovação Cartório<br/>publishApproveTransferJob]
+    WaitApprovals -->|Municipality| ApprovalM[Aprovação Prefeitura<br/>publishApproveTransferJob]
+
+    ApprovalF --> QWApprove1[Queue Worker<br/>processa aprovação]
+    ApprovalR --> QWApprove2[Queue Worker<br/>processa aprovação]
+    ApprovalM --> QWApprove3[Queue Worker<br/>processa aprovação]
+
+    QWApprove1 --> BCApprove1[Blockchain:<br/>approveTransferAsFinancial]
+    QWApprove2 --> BCApprove2[Blockchain:<br/>approveTransferAsRegistryOffice]
+    QWApprove3 --> BCApprove3[Blockchain:<br/>approveTransferAsMunicipality]
+
+    BCApprove1 --> EventApproved1[Evento TransferApproved]
+    BCApprove2 --> EventApproved2[Evento TransferApproved]
+    BCApprove3 --> EventApproved3[Evento TransferApproved]
+
+    EventApproved1 --> WebhookApprove[Webhook: record approval]
+    EventApproved2 --> WebhookApprove
+    EventApproved3 --> WebhookApprove
+
+    WebhookApprove --> BuyerAccept{Comprador<br/>aceitou?}
+
+    BuyerAccept -->|Não| WaitBuyer[Aguardar aceitação<br/>do comprador]
+    WaitBuyer --> BuyerAction[Comprador aceita]
+    BuyerAction --> PublishAcceptJob[Publicar job<br/>ACCEPT_TRANSFER]
+
+    BuyerAccept -->|Sim| CheckAllDone{Todas 3<br/>aprovações<br/>+ aceitação?}
+    PublishAcceptJob --> QWAccept[Queue Worker processa]
+    QWAccept --> BCAccept[Blockchain:<br/>buyerAcceptsTransfer]
+    BCAccept --> CheckAllDone
+
+    CheckAllDone -->|Não| WaitApprovals
+    CheckAllDone -->|Sim| AutoExecute[Auto-execução:<br/>Transfer tokens]
+
+    AutoExecute --> EventExecuted[Evento<br/>TransferExecuted<br/>emitido]
+    EventExecuted --> Webhook2[Event Listener<br/>envia webhook]
+    Webhook2 --> UpdateOwner[Atualizar proprietário<br/>na propriedade]
+    UpdateOwner --> MarkComplete[Status transferência:<br/>CONCLUIDA]
+
+    MarkComplete --> End([Transferência<br/>concluída])
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End
+    Error4 --> End

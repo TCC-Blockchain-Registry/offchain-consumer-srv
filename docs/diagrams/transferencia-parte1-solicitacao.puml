@@ -1,0 +1,124 @@
+@startuml
+!theme plain
+skinparam ParticipantBackgroundColor WhiteSmoke
+skinparam SequenceLifeLineBorderColor Black
+skinparam SequenceGroupBackgroundColor LightBlue
+
+title Transferência de Propriedade - Parte 1: Solicitação
+
+actor "Vendedor" as Seller
+actor "Comprador" as Buyer
+participant "Frontend" as FE
+participant "BFF Gateway" as BFF
+participant "Orchestrator" as Orch
+database "PostgreSQL" as DB
+queue "RabbitMQ" as MQ
+participant "Queue Worker" as QW
+participant "Offchain\nConsumer" as OC
+participant "Blockchain\n(Besu)" as BC
+participant "Event\nListener" as EL
+
+Buyer -> FE: Seleciona propriedade para comprar\n(matriculaId: 12345)
+activate FE
+
+FE -> BFF: POST /api/transfers/request\n{\n  matriculaId: 12345,\n  buyerCpf: "12345678901"\n}
+activate BFF
+
+BFF -> Orch: POST /transfers/request\n+ JWT (authenticated as buyer)
+activate Orch
+
+Orch -> Orch: Extract userId from JWT
+
+Orch -> DB: SELECT * FROM properties\nWHERE matricula_id = 12345
+activate DB
+DB --> Orch: {id, proprietario (sellerId), status: OK, ...}
+deactivate DB
+
+Orch -> Orch: Validate:\n- Property exists\n- Status == OK\n- Buyer != Seller
+
+Orch -> DB: SELECT * FROM transfers\nWHERE matricula_id = 12345\n  AND status NOT IN ('CONCLUIDA')
+activate DB
+DB --> Orch: No active transfer
+deactivate DB
+
+Orch -> DB: SELECT * FROM users\nWHERE cpf = "12345678901"
+activate DB
+DB --> Orch: Buyer {id, walletAddress: 0x1f5c...}
+deactivate DB
+
+Orch -> DB: INSERT INTO transfers\n(\n  matricula_id,\n  seller_id,\n  buyer_id,\n  status\n) VALUES (12345, sellerId, buyerId, 'PENDENTE')
+activate DB
+DB --> Orch: Transfer ID created
+deactivate DB
+
+Orch -> MQ: Publish CONFIGURE_TRANSFER job\n{\n  transferId,\n  sellerAddress: 0x3b59...,\n  buyerAddress: 0x1f5c...,\n  matricula: 12345\n}
+activate MQ
+deactivate MQ
+
+Orch -> DB: UPDATE transfers\nSET status = 'CONFIGURANDO'\nWHERE id = transferId
+activate DB
+deactivate DB
+
+Orch --> BFF: 201 Created\n{transferId, status: "CONFIGURANDO"}
+deactivate Orch
+
+BFF --> FE: Transfer initiated
+deactivate BFF
+
+FE --> Buyer: "Transferência em processamento.\nAguardando configuração na blockchain..."
+deactivate FE
+
+== Processamento Assíncrono ==
+
+MQ --> QW: Consume CONFIGURE_TRANSFER job
+activate QW
+
+QW -> OC: POST /api/transfers/request\n{\n  from: "0x3b59...",\n  to: "0x1f5c...",\n  matricula: 12345\n}
+activate OC
+
+OC -> OC: Build transaction:\nrequestPropertyTransfer(\n  from,\n  to,\n  matricula\n)
+
+OC -> BC: Submit transaction to Besu
+activate BC
+
+BC --> OC: Transaction Hash: 0xdef456...
+OC --> QW: {requestHash, txHash}
+deactivate QW
+
+BC -> BC: Mine transaction
+
+BC -> BC: Validate:\n- propertyExists[matricula]\n- propertyOwner[matricula] == from\n- identityRegistry.isVerified(to)
+
+BC -> BC: Calculate requestHash:\nkeccak256(from, to, matricula)
+
+BC -> BC: Store in pendingTransfers[requestHash]:\n{\n  matricula,\n  from,\n  to,\n  requester,\n  requestedAt,\n  exists: true,\n  financialApproved: false,\n  registryOfficeApproved: false,\n  municipalityApproved: false,\n  buyerAccepted: false,\n  executed: false\n}
+
+BC -> BC: **Emit TransferRequested**\n{\n  requestHash,\n  matricula,\n  from,\n  to,\n  requester\n}
+
+BC --> EL: Event detected
+deactivate BC
+activate EL
+
+EL -> EL: Parse event:\n- event.args[0] = requestHash\n- event.args[1] = matricula\n- event.args[2] = from\n- event.args[3] = to\n- event.transactionHash
+
+EL -> Orch: POST /webhooks/.../transfer-requested\n{\n  transferHash: requestHash,\n  matriculaId: 12345,\n  from: "0x3b59...",\n  to: "0x1f5c...",\n  transactionHash: "0xdef456..."\n}
+activate Orch
+
+Orch -> DB: UPDATE transfers\nSET request_hash = ?,\n    blockchain_tx_hash = ?,\n    status = 'AGUARDANDO_APROVACOES'\nWHERE matricula_id = 12345
+activate DB
+DB --> Orch: Updated
+deactivate DB
+
+Orch --> EL: 200 OK
+deactivate Orch
+deactivate EL
+
+note over Buyer, BC
+**STATUS ATUAL:**
+- Transferência: AGUARDANDO_APROVACOES
+- request_hash: preenchido
+- blockchain_tx_hash: preenchido
+- Aguardando 3 aprovações + aceitação do comprador (parte 2)
+end note
+
+@enduml

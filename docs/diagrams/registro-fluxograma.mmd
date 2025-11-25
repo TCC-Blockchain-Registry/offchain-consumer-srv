@@ -1,0 +1,46 @@
+%%{init: {'theme':'base'}}%%
+flowchart TD
+    Start([Usuário solicita registro]) --> ValidateInput{Validar dados<br/>da propriedade}
+    ValidateInput -->|Inválido| Error1[Retornar erro<br/>de validação]
+    ValidateInput -->|Válido| CheckExists{Matrícula<br/>já existe?}
+
+    CheckExists -->|Sim| Error2[Retornar erro:<br/>Propriedade já existe]
+    CheckExists -->|Não| CreateDB[Criar registro no BD<br/>Status: PENDENTE]
+
+    CreateDB --> PublishJob[Publicar job<br/>REGISTER_PROPERTY<br/>no RabbitMQ]
+    PublishJob --> UpdateStatus1[Atualizar status:<br/>PROCESSANDO_REGISTRO]
+
+    UpdateStatus1 --> QueueWorker[Queue Worker<br/>consome job]
+    QueueWorker --> CallOffchain[Chamar Offchain API<br/>/api/properties/register]
+
+    CallOffchain --> BuildTx[Construir transação<br/>requestPropertyRegistration]
+    BuildTx --> SubmitTx[Submeter transação<br/>para blockchain]
+
+    SubmitTx --> WaitConfirm[Aguardar confirmação<br/>da transação]
+    WaitConfirm --> EventEmitted{Evento<br/>RegistrationRequested<br/>emitido?}
+
+    EventEmitted -->|Sim| Webhook1[Event Listener<br/>envia webhook]
+    EventEmitted -->|Não| Error3[Falha na transação]
+
+    Webhook1 --> UpdateRequestHash[Orchestrator atualiza<br/>request_hash e tx_hash]
+    UpdateRequestHash --> WaitApprovals{Aguardar 3<br/>aprovações}
+
+    WaitApprovals -->|Financial| Approval1[Aprovação Financeira]
+    WaitApprovals -->|Registry| Approval2[Aprovação Cartório]
+    WaitApprovals -->|Municipality| Approval3[Aprovação Prefeitura]
+
+    Approval1 --> CheckAllApproved{Todas as 3<br/>aprovações?}
+    Approval2 --> CheckAllApproved
+    Approval3 --> CheckAllApproved
+
+    CheckAllApproved -->|Não| WaitApprovals
+    CheckAllApproved -->|Sim| AutoExecute[Auto-execução:<br/>Mint tokens]
+
+    AutoExecute --> EventRegistered[Evento<br/>RegistrationExecuted<br/>emitido]
+    EventRegistered --> Webhook2[Event Listener<br/>envia webhook]
+    Webhook2 --> MarkComplete[Atualizar propriedade<br/>Status: OK]
+
+    MarkComplete --> End([Registro<br/>concluído])
+    Error1 --> End
+    Error2 --> End
+    Error3 --> End

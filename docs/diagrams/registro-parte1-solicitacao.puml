@@ -1,0 +1,109 @@
+@startuml
+!theme plain
+skinparam ParticipantBackgroundColor WhiteSmoke
+skinparam SequenceLifeLineBorderColor Black
+skinparam SequenceGroupBackgroundColor LightBlue
+
+title Registro de Propriedade - Parte 1: Solicitação
+
+actor "Usuário\n(Proprietário)" as User
+participant "Frontend" as FE
+participant "BFF Gateway" as BFF
+participant "Orchestrator" as Orch
+database "PostgreSQL" as DB
+queue "RabbitMQ" as MQ
+participant "Queue Worker" as QW
+participant "Offchain\nConsumer" as OC
+participant "Blockchain\n(Besu)" as BC
+participant "Event\nListener" as EL
+
+User -> FE: Preenche formulário de registro\n{matriculaId, endereço, metragem, ...}
+activate FE
+
+FE -> BFF: POST /api/properties/register\n{matriculaId, proprietario, ...}
+activate BFF
+
+BFF -> Orch: Proxy: POST /properties/register\n+ JWT validation
+activate Orch
+
+Orch -> Orch: Validar dados de entrada\n(matricula única, campos obrigatórios)
+
+Orch -> DB: SELECT * FROM properties\nWHERE matricula_id = ?
+activate DB
+DB --> Orch: Not found
+deactivate DB
+
+Orch -> DB: INSERT INTO properties\n(matricula_id, proprietario, ...)\nstatus = PENDENTE
+activate DB
+DB --> Orch: Property ID created
+deactivate DB
+
+Orch -> MQ: Publish REGISTER_PROPERTY job\n{propertyId, matriculaId, beneficiary, ...}
+activate MQ
+deactivate MQ
+
+Orch -> DB: UPDATE properties\nSET status = PROCESSANDO_REGISTRO
+activate DB
+deactivate DB
+
+Orch --> BFF: 201 Created\n{propertyId, status: "PROCESSANDO_REGISTRO"}
+deactivate Orch
+
+BFF --> FE: Property registration initiated
+deactivate BFF
+
+FE --> User: "Propriedade em processamento.\nAguardando confirmação na blockchain..."
+deactivate FE
+
+== Processamento Assíncrono ==
+
+MQ --> QW: Consume REGISTER_PROPERTY job
+activate QW
+
+QW -> OC: POST /api/properties/register\n{matriculaId, beneficiary, ...}
+activate OC
+
+OC -> OC: Build transaction:\nrequestPropertyRegistration(\n  matricula,\n  beneficiary\n)
+
+OC -> BC: Submit transaction to Besu
+activate BC
+
+BC --> OC: Transaction Hash: 0xabc123...
+OC --> QW: {requestHash, txHash}
+deactivate QW
+
+BC -> BC: Mine transaction\n(QBFT consensus)
+
+BC -> BC: Calculate requestHash:\nkeccak256(beneficiary, matricula)
+
+BC -> BC: Store in pendingRegistrations[requestHash]:\n{\n  matricula, beneficiary,\n  requester, requestedAt,\n  exists: true,\n  financialApproved: false,\n  registryOfficeApproved: false,\n  municipalityApproved: false,\n  executed: false\n}
+
+BC -> BC: **Emit RegistrationRequested**\n{\n  requestHash,\n  matricula,\n  beneficiary,\n  requester\n}
+
+BC --> EL: Event detected
+deactivate BC
+activate EL
+
+EL -> EL: Parse event:\n- event.args[0] = requestHash\n- event.args[1] = matricula\n- event.args[2] = beneficiary\n- event.transactionHash
+
+EL -> Orch: POST /webhooks/blockchain/properties/\nregistration-requested\n{\n  requestHash,\n  matriculaId,\n  beneficiary,\n  transactionHash\n}
+activate Orch
+
+Orch -> DB: UPDATE properties\nSET request_hash = ?,\n    blockchain_tx_hash = ?\nWHERE matricula_id = ?
+activate DB
+DB --> Orch: Updated
+deactivate DB
+
+Orch --> EL: 200 OK
+deactivate Orch
+deactivate EL
+
+note over User, BC
+**STATUS ATUAL:**
+- Propriedade: PROCESSANDO_REGISTRO
+- request_hash: preenchido
+- blockchain_tx_hash: preenchido
+- Aguardando 3 aprovações (parte 2)
+end note
+
+@enduml

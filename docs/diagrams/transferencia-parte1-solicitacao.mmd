@@ -1,0 +1,73 @@
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
+sequenceDiagram
+    actor Buyer as Comprador
+    participant FE as Frontend
+    participant BFF as BFF Gateway
+    participant Orch as Orchestrator
+    participant DB as PostgreSQL
+    participant MQ as RabbitMQ
+    participant QW as Queue Worker
+    participant OC as Offchain<br/>Consumer
+    participant BC as Blockchain<br/>(Besu)
+    participant EL as Event<br/>Listener
+
+    Buyer->>FE: Seleciona propriedade para comprar<br/>(matriculaId: 12345)
+    FE->>BFF: POST /api/transfers/request<br/>{matriculaId: 12345, buyerCpf: "12345678901"}
+    BFF->>Orch: POST /transfers/request<br/>+ JWT (authenticated as buyer)
+
+    Orch->>Orch: Extract userId from JWT
+
+    Orch->>DB: SELECT * FROM properties<br/>WHERE matricula_id = 12345
+    DB-->>Orch: {id, proprietario (sellerId), status: OK, ...}
+
+    Orch->>Orch: Validate:<br/>- Property exists<br/>- Status == OK<br/>- Buyer != Seller
+
+    Orch->>DB: SELECT * FROM transfers<br/>WHERE matricula_id = 12345<br/>AND status NOT IN ('CONCLUIDA')
+    DB-->>Orch: No active transfer
+
+    Orch->>DB: SELECT * FROM users<br/>WHERE cpf = "12345678901"
+    DB-->>Orch: Buyer {id, walletAddress: 0x1f5c...}
+
+    Orch->>DB: INSERT INTO transfers<br/>(matricula_id, seller_id, buyer_id, status)<br/>VALUES (12345, sellerId, buyerId, 'PENDENTE')
+    DB-->>Orch: Transfer ID created
+
+    Orch->>MQ: Publish CONFIGURE_TRANSFER job<br/>{transferId, sellerAddress: 0x3b59...,<br/>buyerAddress: 0x1f5c..., matricula: 12345}
+
+    Orch->>DB: UPDATE transfers<br/>SET status = 'CONFIGURANDO'<br/>WHERE id = transferId
+
+    Orch-->>BFF: 201 Created<br/>{transferId, status: "CONFIGURANDO"}
+    BFF-->>FE: Transfer initiated
+    FE-->>Buyer: "Transferência em processamento.<br/>Aguardando configuração na blockchain..."
+
+    Note over MQ,OC: === Processamento Assíncrono ===
+
+    MQ-->>QW: Consume CONFIGURE_TRANSFER job
+    QW->>OC: POST /api/transfers/request<br/>{from: "0x3b59...", to: "0x1f5c...", matricula: 12345}
+
+    OC->>OC: Build transaction:<br/>requestPropertyTransfer(from, to, matricula)
+
+    OC->>BC: Submit transaction to Besu
+    BC-->>OC: Transaction Hash: 0xdef456...
+
+    BC->>BC: Mine transaction
+
+    BC->>BC: Validate:<br/>- propertyExists[matricula]<br/>- propertyOwner[matricula] == from<br/>- identityRegistry.isVerified(to)
+
+    BC->>BC: Calculate requestHash:<br/>keccak256(from, to, matricula)
+
+    BC->>BC: Store in pendingTransfers[requestHash]:<br/>{matricula, from, to, requester, requestedAt,<br/>exists: true, financialApproved: false,<br/>registryOfficeApproved: false,<br/>municipalityApproved: false,<br/>buyerAccepted: false, executed: false}
+
+    BC->>BC: **Emit TransferRequested**<br/>{requestHash, matricula, from, to, requester}
+
+    BC-->>EL: Event detected
+
+    EL->>EL: Parse event:<br/>- event.args[0] = requestHash<br/>- event.args[1] = matricula<br/>- event.args[2] = from<br/>- event.args[3] = to<br/>- event.transactionHash
+
+    EL->>Orch: POST /webhooks/.../transfer-requested<br/>{transferHash: requestHash, matriculaId: 12345,<br/>from: "0x3b59...", to: "0x1f5c...",<br/>transactionHash: "0xdef456..."}
+
+    Orch->>DB: UPDATE transfers<br/>SET request_hash = ?,<br/>    blockchain_tx_hash = ?,<br/>    status = 'AGUARDANDO_APROVACOES'<br/>WHERE matricula_id = 12345
+    DB-->>Orch: Updated
+
+    Orch-->>EL: 200 OK
+
+    Note over Buyer,BC: **STATUS ATUAL:**<br/>- Transferência: AGUARDANDO_APROVACOES<br/>- request_hash: preenchido<br/>- blockchain_tx_hash: preenchido<br/>- Aguardando 3 aprovações + aceitação do comprador (parte 2)

@@ -1,0 +1,59 @@
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
+sequenceDiagram
+    actor IF as Instituição<br/>Financeira
+    actor Cartorio as Cartório
+    actor Prefeitura as Prefeitura
+    participant OC as Offchain<br/>Consumer<br/>(API Pública)
+    participant BC as Blockchain<br/>(Besu)
+    participant EL as Event<br/>Listener
+    participant Orch as Orchestrator
+    participant DB as PostgreSQL
+
+    Note over IF,DB: **ESTADO INICIAL:**<br/>Propriedade aguardando 3 aprovações<br/>requestHash já definido na blockchain
+
+    Note over IF,DB: === Aprovação 1/3: Instituição Financeira ===
+
+    IF->>OC: **POST /api/properties/approve**<br/>{requestHash: "0xabc...", institution: "FINANCIAL"}
+    OC->>BC: approveRegistrationAsFinancial(requestHash)
+    BC->>BC: Validate & set<br/>pendingRegistrations[requestHash]<br/>.financialApproved = true
+    BC->>BC: **Emit RegistrationApproved**<br/>{requestHash, "FINANCIAL", approver}
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../registration-approved<br/>{requestHash, institution: "FINANCIAL", approver}
+    Orch->>DB: Record approval 1/3
+    Orch-->>EL: 200 OK
+
+    Note over IF,DB: === Aprovação 2/3: Cartório ===
+
+    Cartorio->>OC: **POST /api/properties/approve**<br/>{requestHash: "0xabc...", institution: "REGISTRY_OFFICE"}
+    OC->>BC: approveRegistrationAsRegistryOffice(requestHash)
+    BC->>BC: pendingRegistrations[requestHash]<br/>.registryOfficeApproved = true
+    BC->>BC: **Emit RegistrationApproved**
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../registration-approved
+    Orch->>DB: Record approval 2/3
+    Orch-->>EL: 200 OK
+
+    Note over IF,DB: === Aprovação 3/3: Prefeitura (Auto-execução) ===
+
+    Prefeitura->>OC: **POST /api/properties/approve**<br/>{requestHash: "0xabc...", institution: "MUNICIPALITY"}
+    OC->>BC: approveRegistrationAsMunicipality(requestHash)
+    BC->>BC: pendingRegistrations[requestHash]<br/>.municipalityApproved = true
+    BC->>BC: **Emit RegistrationApproved**
+
+    BC->>BC: **Check: All 3 approvals granted?**<br/>✓ financialApproved<br/>✓ registryOfficeApproved<br/>✓ municipalityApproved
+
+    BC->>BC: **AUTO-EXECUTE:**<br/>_executeRegistration(requestHash)
+    BC->>BC: mint(beneficiary, matricula)<br/>Transfer tokens: 0x0 → beneficiary
+    BC->>BC: propertyExists[matricula] = true<br/>propertyOwner[matricula] = beneficiary
+    BC->>BC: pendingRegistrations[requestHash]<br/>.executed = true
+
+    BC->>BC: **Emit RegistrationExecuted**<br/>{requestHash, matricula, beneficiary}
+
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../registration-executed<br/>{requestHash, matriculaId, beneficiary, txHash}
+
+    Orch->>DB: UPDATE properties<br/>SET status = 'OK',<br/>    proprietario = beneficiary<br/>WHERE request_hash = ?
+    DB-->>Orch: Updated
+    Orch-->>EL: 200 OK
+
+    Note over IF,DB: **RESULTADO FINAL:**<br/>✅ Propriedade registrada com sucesso<br/>✅ Tokens mintados para o proprietário<br/>✅ Status: OK

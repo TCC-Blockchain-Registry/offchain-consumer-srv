@@ -1,0 +1,55 @@
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
+sequenceDiagram
+    actor User as Usuário<br/>(Proprietário)
+    participant FE as Frontend
+    participant BFF as BFF Gateway
+    participant Orch as Orchestrator
+    participant DB as PostgreSQL
+    participant MQ as RabbitMQ
+    participant QW as Queue Worker
+    participant OC as Offchain<br/>Consumer
+    participant BC as Blockchain<br/>(Besu)
+    participant EL as Event<br/>Listener
+
+    User->>FE: Preenche formulário de registro<br/>{matriculaId, endereço, metragem, ...}
+    FE->>BFF: POST /api/properties/register<br/>{matriculaId, proprietario, ...}
+    BFF->>Orch: Proxy: POST /properties/register<br/>+ JWT validation
+
+    Orch->>Orch: Validar dados de entrada<br/>(matricula única, campos obrigatórios)
+    Orch->>DB: SELECT * FROM properties<br/>WHERE matricula_id = ?
+    DB-->>Orch: Not found
+
+    Orch->>DB: INSERT INTO properties<br/>(matricula_id, proprietario, ...)<br/>status = PENDENTE
+    DB-->>Orch: Property ID created
+
+    Orch->>MQ: Publish REGISTER_PROPERTY job<br/>{propertyId, matriculaId, beneficiary, ...}
+    Orch->>DB: UPDATE properties<br/>SET status = PROCESSANDO_REGISTRO
+
+    Orch-->>BFF: 201 Created<br/>{propertyId, status: "PROCESSANDO_REGISTRO"}
+    BFF-->>FE: Property registration initiated
+    FE-->>User: "Propriedade em processamento.<br/>Aguardando confirmação na blockchain..."
+
+    Note over MQ,OC: === Processamento Assíncrono ===
+
+    MQ-->>QW: Consume REGISTER_PROPERTY job
+    QW->>OC: POST /api/properties/register<br/>{matriculaId, beneficiary, ...}
+
+    OC->>OC: Build transaction:<br/>requestPropertyRegistration(<br/>  matricula,<br/>  beneficiary<br/>)
+    OC->>BC: Submit transaction to Besu
+    BC-->>OC: Transaction Hash: 0xabc123...
+
+    BC->>BC: Mine transaction<br/>(QBFT consensus)
+    BC->>BC: Calculate requestHash:<br/>keccak256(beneficiary, matricula)
+    BC->>BC: Store in pendingRegistrations[requestHash]
+    BC->>BC: **Emit RegistrationRequested**<br/>{requestHash, matricula, beneficiary, requester}
+
+    BC-->>EL: Event detected
+
+    EL->>EL: Parse event:<br/>- event.args[0] = requestHash<br/>- event.args[1] = matricula<br/>- event.transactionHash
+    EL->>Orch: POST /webhooks/.../registration-requested<br/>{requestHash, matriculaId, beneficiary, txHash}
+
+    Orch->>DB: UPDATE properties<br/>SET request_hash = ?,<br/>    blockchain_tx_hash = ?<br/>WHERE matricula_id = ?
+    DB-->>Orch: Updated
+    Orch-->>EL: 200 OK
+
+    Note over User,BC: **STATUS ATUAL:**<br/>- Propriedade: PROCESSANDO_REGISTRO<br/>- request_hash: preenchido<br/>- Aguardando 3 aprovações (parte 2)

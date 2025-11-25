@@ -1,0 +1,96 @@
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
+sequenceDiagram
+    actor IF as Instituição<br/>Financeira
+    actor Cartorio as Cartório
+    actor Prefeitura as Prefeitura
+    actor Buyer as Comprador
+    participant FE as Frontend
+    participant BFF as BFF Gateway
+    participant Orch as Orchestrator
+    participant OC as Offchain<br/>Consumer<br/>(API Pública)
+    participant BC as Blockchain<br/>(Besu)
+    participant EL as Event<br/>Listener
+    participant DB as PostgreSQL
+
+    Note over IF,DB: **ESTADO INICIAL:**<br/>Transfer aguardando 3 aprovações + aceitação comprador<br/>requestHash já definido na blockchain
+
+    Note over IF,DB: === Aprovação 1/3: Instituição Financeira ===
+
+    IF->>OC: **POST /api/transfers/approve**<br/>{requestHash: "0x...", institution: "FINANCIAL"}
+    OC->>BC: approveTransferAsFinancial(requestHash)
+    BC->>BC: pendingTransfers[requestHash]<br/>.financialApproved = true
+    BC->>BC: **Emit TransferApproved**<br/>{requestHash, "FINANCIAL", approver}
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../transfer-approved
+    Orch->>DB: Record approval 1/3
+
+    Note over IF,DB: === Aprovação 2/3: Cartório ===
+
+    Cartorio->>OC: **POST /api/transfers/approve**<br/>{requestHash: "0x...", institution: "REGISTRY_OFFICE"}
+    OC->>BC: approveTransferAsRegistryOffice(requestHash)
+    BC->>BC: pendingTransfers[requestHash]<br/>.registryOfficeApproved = true
+    BC->>BC: **Emit TransferApproved**
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../transfer-approved
+    Orch->>DB: Record approval 2/3
+
+    Note over IF,DB: === Aprovação 3/3: Prefeitura ===
+
+    Prefeitura->>OC: **POST /api/transfers/approve**<br/>{requestHash: "0x...", institution: "MUNICIPALITY"}
+    OC->>BC: approveTransferAsMunicipality(requestHash)
+    BC->>BC: pendingTransfers[requestHash]<br/>.municipalityApproved = true
+    BC->>BC: **Emit TransferApproved**
+    BC-->>EL: Event detected
+    EL->>Orch: POST /webhooks/.../transfer-approved
+    Orch->>DB: Record approval 3/3
+
+    Note over BC: **3 aprovações OK**<br/>Aguardando aceitação do comprador...
+
+    Note over Buyer,DB: === Aceitação do Comprador ===
+
+    Buyer->>FE: Aceita a transferência
+    FE->>BFF: POST /api/transfers/{id}/accept
+    BFF->>Orch: POST /transfers/{id}/accept<br/>+ JWT (authenticated as buyer)
+
+    Orch->>Orch: Validate buyer matches transfer
+
+    Orch->>DB: SELECT * FROM transfers WHERE id = ?
+    DB-->>Orch: {buyer_id, request_hash, ...}
+
+    Orch->>DB: SELECT wallet_address FROM users<br/>WHERE id = buyer_id
+    DB-->>Orch: {walletAddress: "0x1f5c..."}
+
+    Orch-->>BFF: Acceptance recorded
+    BFF-->>FE: OK
+    FE-->>Buyer: "Aceitação registrada.<br/>Processando transferência..."
+
+    Note over Orch: Orchestrator calls Offchain Consumer<br/>to record buyer acceptance on blockchain
+
+    Orch->>OC: POST /api/transfers/accept<br/>{requestHash, buyerAddress}
+    OC->>BC: buyerAcceptsTransfer(requestHash)
+
+    BC->>BC: pendingTransfers[requestHash]<br/>.buyerAccepted = true
+
+    BC->>BC: **Check: All conditions met?**<br/>financialApproved ✓<br/>registryOfficeApproved ✓<br/>municipalityApproved ✓<br/>buyerAccepted ✓
+
+    BC->>BC: **AUTO-EXECUTE:**<br/>_executeTransfer(requestHash)
+
+    BC->>BC: transfer(from, to, matricula)<br/>Transfer tokens: from → to
+
+    BC->>BC: propertyOwner[matricula] = to
+
+    BC->>BC: pendingTransfers[requestHash]<br/>.executed = true
+
+    BC->>BC: **Emit TransferExecuted**<br/>{requestHash, matricula, from, to}
+
+    BC-->>EL: Event detected
+
+    EL->>Orch: POST /webhooks/.../transfer-executed<br/>{requestHash, matriculaId, from, to, transactionHash}
+
+    Orch->>DB: UPDATE properties<br/>SET proprietario = buyer_id,<br/>    status = 'OK'<br/>WHERE matricula_id = ?
+
+    Orch->>DB: UPDATE transfers<br/>SET status = 'CONCLUIDA'<br/>WHERE request_hash = ?
+
+    Orch-->>EL: 200 OK
+
+    Note over Buyer,DB: **RESULTADO FINAL:**<br/>✅ Transferência concluída<br/>✅ Tokens transferidos: vendedor → comprador<br/>✅ Proprietário atualizado na blockchain<br/>✅ Status transfer: CONCLUIDA<br/>✅ Status propriedade: OK

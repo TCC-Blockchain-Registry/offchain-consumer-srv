@@ -1,0 +1,90 @@
+@startuml
+!theme plain
+skinparam ParticipantBackgroundColor WhiteSmoke
+skinparam SequenceLifeLineBorderColor Black
+skinparam SequenceGroupBackgroundColor LightBlue
+
+title Transferência de Propriedade - Parte 2: Aprovações, Aceitação e Execução
+
+actor "Instituição\nFinanceira" as IF
+actor "Cartório" as Cartorio
+actor "Prefeitura" as Prefeitura
+participant "Offchain\nConsumer\n(API Pública)" as OC
+participant "Blockchain\n(Besu)" as BC
+participant "Event\nListener" as EL
+database "PostgreSQL" as DB
+
+note over IF, DB
+**ESTADO INICIAL:**
+Transfer aguardando 3 aprovações
+requestHash já definido na blockchain
+end note
+
+== Aprovação 1/3: Instituição Financeira ==
+
+IF -> OC: **POST /api/transfers/approve**\n{requestHash: "0x...", institution: "FINANCIAL"}
+activate OC
+OC -> BC: approveTransferAsFinancial(requestHash)
+activate BC
+BC -> BC: pendingTransfers[requestHash]\n  .financialApproved = true
+BC -> BC: **Emit TransferApproved**\n{requestHash, "FINANCIAL", approver}
+BC --> EL: Event detected
+deactivate BC
+activate EL
+EL -> Orch: POST /webhooks/.../transfer-approved
+activate Orch
+Orch -> DB: Record approval 1/3
+deactivate Orch
+deactivate EL
+deactivate OC
+
+== Aprovação 2/3: Cartório ==
+
+Cartorio -> OC: **POST /api/transfers/approve**\n{requestHash: "0x...", institution: "REGISTRY_OFFICE"}
+activate OC
+OC -> BC: approveTransferAsRegistryOffice(requestHash)
+activate BC
+BC -> BC: pendingTransfers[requestHash]\n  .registryOfficeApproved = true
+BC -> BC: **Emit TransferApproved**
+BC --> EL: Event detected
+deactivate BC
+activate EL
+EL -> Orch: POST /webhooks/.../transfer-approved
+activate Orch
+Orch -> DB: Record approval 2/3
+deactivate Orch
+deactivate EL
+deactivate OC
+
+== Aprovação 3/3: Prefeitura ==
+
+Prefeitura -> OC: **POST /api/transfers/approve**\n{requestHash: "0x...", institution: "MUNICIPALITY"}
+activate OC
+OC -> BC: approveTransferAsMunicipality(requestHash)
+activate BC
+BC -> BC: pendingTransfers[requestHash]\n  .municipalityApproved = true
+BC -> BC: **Emit TransferApproved**
+BC --> EL: Event detected
+deactivate BC
+activate EL
+EL -> Orch: POST /webhooks/.../transfer-approved
+activate Orch
+Orch -> DB: Record approval 3/3
+deactivate Orch
+deactivate EL
+deactivate OC
+
+note over BC
+**3 aprovações OK**
+end note
+
+note over Buyer, DB
+**RESULTADO FINAL:**
+✅ Transferência concluída
+✅ Tokens transferidos: vendedor → comprador
+✅ Proprietário atualizado na blockchain
+✅ Status transfer: CONCLUIDA
+✅ Status propriedade: OK
+end note
+
+@enduml
